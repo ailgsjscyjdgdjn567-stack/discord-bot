@@ -41,6 +41,23 @@ function clearWarnings(guildId: string, userId: string) {
   warnings.get(guildId)?.set(userId, []);
 }
 
+interface SayLog {
+  userId: string;
+  userTag: string;
+  content: string;
+  channelId: string;
+  timestamp: number;
+}
+
+const sayLog = new Map<string, SayLog>();
+
+function isAdminOrOwner(member: GuildMember, guild: import("discord.js").Guild): boolean {
+  return (
+    member.id === guild.ownerId ||
+    member.permissions.has(PermissionFlagsBits.Administrator)
+  );
+}
+
 const token = process.env["DISCORD_BOT_TOKEN"];
 if (!token) {
   throw new Error("DISCORD_BOT_TOKEN is required but not set.");
@@ -191,6 +208,23 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("say")
+    .setDescription("Отправить сообщение от лица бота (только для овнера и админов)")
+    .addStringOption((opt) =>
+      opt.setName("текст").setDescription("Текст сообщения").setRequired(true)
+    )
+    .addChannelOption((opt) =>
+      opt.setName("канал").setDescription("Канал для отправки (по умолчанию текущий)").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("whosaid")
+    .setDescription("Узнать кто написал сообщение через /say (только для овнера и админов)")
+    .addStringOption((opt) =>
+      opt.setName("id").setDescription("ID сообщения (правая кнопка → Скопировать ID)").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
     .setName("8ball")
     .setDescription("Спроси магический шар")
     .addStringOption((opt) =>
@@ -334,6 +368,8 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/role <пользователь> <роль>", value: "Выдать/снять роль (требует право Manage Roles)", inline: false },
               { name: "/chat on / off", value: "Включить/выключить режим чата с ИИ в канале", inline: false },
               { name: "/warn · /warnings · /clearwarns", value: "Система предупреждений", inline: false },
+              { name: "/say <текст> [канал]", value: "Написать от лица бота (овнер и администраторы)", inline: false },
+              { name: "/whosaid <id>", value: "Узнать кто написал через /say (овнер и администраторы)", inline: false },
               { name: "─── 🎉 Фан-команды (для всех) ───", value: "\u200b", inline: false },
               { name: "/8ball <вопрос>", value: "Магический шар предсказаний", inline: false },
               { name: "/coinflip", value: "Орёл или решка", inline: false },
@@ -687,6 +723,111 @@ client.on("interactionCreate", async (interaction) => {
             .setTitle("🗑️ Предупреждения сброшены")
             .setDescription(`Удалено **${before}** предупреждений у ${target.tag}.`),
         ],
+      });
+    }
+
+    else if (commandName === "say") {
+      const member = interaction.member as GuildMember | null;
+      if (!member || !isAdminOrOwner(member, interaction.guild!)) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle("🚫 Нет доступа")
+              .setDescription("Команда `/say` доступна только **овнеру** и **администраторам** сервера."),
+          ],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const text = interaction.options.getString("текст", true);
+      const channelOption = interaction.options.getChannel("канал");
+
+      let targetChannel: import("discord.js").TextChannel;
+
+      if (channelOption) {
+        const fetched = await interaction.guild!.channels.fetch(channelOption.id);
+        if (!fetched || !fetched.isTextBased() || fetched.isDMBased()) {
+          await interaction.reply({ content: "❌ Указанный канал недоступен.", ephemeral: true });
+          return;
+        }
+        targetChannel = fetched as import("discord.js").TextChannel;
+      } else {
+        if (!interaction.channel || !interaction.channel.isTextBased() || interaction.channel.isDMBased()) {
+          await interaction.reply({ content: "❌ Текущий канал недоступен.", ephemeral: true });
+          return;
+        }
+        targetChannel = interaction.channel as import("discord.js").TextChannel;
+      }
+
+      const sent = await targetChannel.send(text);
+
+      sayLog.set(sent.id, {
+        userId: interaction.user.id,
+        userTag: interaction.user.tag,
+        content: text,
+        channelId: targetChannel.id,
+        timestamp: Date.now(),
+      });
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x57f287)
+            .setTitle("✅ Сообщение отправлено")
+            .setDescription(`Отправлено в <#${targetChannel.id}>`)
+            .setFooter({ text: `ID сообщения: ${sent.id}` }),
+        ],
+        ephemeral: true,
+      });
+    }
+
+    else if (commandName === "whosaid") {
+      const member = interaction.member as GuildMember | null;
+      if (!member || !isAdminOrOwner(member, interaction.guild!)) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle("🚫 Нет доступа")
+              .setDescription("Команда `/whosaid` доступна только **овнеру** и **администраторам** сервера."),
+          ],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const messageId = interaction.options.getString("id", true).trim();
+      const log = sayLog.get(messageId);
+
+      if (!log) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xfee75c)
+              .setTitle("❓ Не найдено")
+              .setDescription("Это сообщение не было отправлено через `/say`, или запись не сохранилась (бот перезапускался)."),
+          ],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const date = new Date(log.timestamp).toLocaleString("ru-RU");
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle("🔍 Автор сообщения")
+            .addFields(
+              { name: "Написал", value: `<@${log.userId}> (${log.userTag})`, inline: false },
+              { name: "Канал", value: `<#${log.channelId}>`, inline: true },
+              { name: "Дата", value: date, inline: true },
+              { name: "Текст", value: log.content.slice(0, 1024), inline: false },
+            ),
+        ],
+        ephemeral: true,
       });
     }
 
