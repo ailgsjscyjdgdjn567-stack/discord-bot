@@ -245,7 +245,7 @@ client.on("interactionCreate", async (interaction) => {
 
   const { commandName } = interaction;
 
-  if (interaction.guild && interaction.user.id !== interaction.guild.ownerId) {
+  if (interaction.guild && interaction.user.id !== interaction.guild.ownerId && commandName !== "ask") {
     await interaction.reply({
       embeds: [
         new EmbedBuilder()
