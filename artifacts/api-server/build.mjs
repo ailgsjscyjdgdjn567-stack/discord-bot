@@ -41,6 +41,13 @@ async function buildAll() {
       "xxhash-addon",
       "bufferutil",
       "utf-8-validate",
+      "play-opus",
+      "opusscript",
+      "sodium-native",
+      "sodium",
+      "@discordjs/opus",
+      "tweetnacl",
+      "libsodium-wrappers",
       "ssh2",
       "cpu-features",
       "dtrace-provider",
@@ -101,6 +108,7 @@ async function buildAll() {
       "puppeteer-core",
       "electron",
     ],
+    loader: { ".node": "copy" },
     sourcemap: "linked",
     plugins: [
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it

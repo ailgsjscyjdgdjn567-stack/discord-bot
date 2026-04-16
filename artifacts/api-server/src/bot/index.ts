@@ -12,6 +12,19 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import {
+  initMusic,
+  addToQueue,
+  stopMusic,
+  skipTrack,
+  pauseMusic,
+  resumeMusic,
+  toggleLoop,
+  getNowPlaying,
+  getQueueList,
+  isLooping,
+  removeFromQueue,
+} from "./music";
 
 const chatModeChannels = new Set<string>();
 
@@ -70,6 +83,7 @@ export const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildVoiceStates,
   ],
   partials: [Partials.GuildMember],
 });
@@ -208,6 +222,48 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("play")
+    .setDescription("Включить музыку в голосовом канале")
+    .addStringOption((opt) =>
+      opt.setName("запрос").setDescription("Название трека или YouTube-ссылка").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("stop")
+    .setDescription("Остановить музыку и выйти из канала"),
+
+  new SlashCommandBuilder()
+    .setName("skip")
+    .setDescription("Пропустить текущий трек"),
+
+  new SlashCommandBuilder()
+    .setName("queue")
+    .setDescription("Показать очередь треков"),
+
+  new SlashCommandBuilder()
+    .setName("pause")
+    .setDescription("Поставить музыку на паузу"),
+
+  new SlashCommandBuilder()
+    .setName("resume")
+    .setDescription("Продолжить воспроизведение"),
+
+  new SlashCommandBuilder()
+    .setName("nowplaying")
+    .setDescription("Показать информацию о текущем треке"),
+
+  new SlashCommandBuilder()
+    .setName("loop")
+    .setDescription("Включить/выключить повтор текущего трека"),
+
+  new SlashCommandBuilder()
+    .setName("remove")
+    .setDescription("Удалить трек из очереди")
+    .addIntegerOption((opt) =>
+      opt.setName("номер").setDescription("Номер трека в очереди").setRequired(true).setMinValue(2)
+    ),
+
+  new SlashCommandBuilder()
     .setName("say")
     .setDescription("Отправить сообщение от лица бота (только для овнера и админов)")
     .addStringOption((opt) =>
@@ -289,6 +345,7 @@ async function registerCommands(guildId: string) {
 }
 
 client.once("ready", async () => {
+  initMusic(client);
   logger.info({ tag: client.user?.tag }, "Discord bot ready");
   for (const guild of client.guilds.cache.values()) {
     try {
@@ -370,6 +427,15 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/warn · /warnings · /clearwarns", value: "Система предупреждений", inline: false },
               { name: "/say <текст> [канал]", value: "Написать от лица бота (овнер и администраторы)", inline: false },
               { name: "/whosaid <id>", value: "Узнать кто написал через /say (овнер и администраторы)", inline: false },
+              { name: "─── 🎵 Музыка (для всех) ───", value: "\u200b", inline: false },
+              { name: "/play <запрос>", value: "Включить музыку по названию или YouTube-ссылке", inline: false },
+              { name: "/stop", value: "Остановить музыку и выйти из канала", inline: false },
+              { name: "/skip", value: "Пропустить текущий трек", inline: false },
+              { name: "/queue", value: "Показать очередь треков", inline: false },
+              { name: "/pause / /resume", value: "Пауза / Продолжить воспроизведение", inline: false },
+              { name: "/nowplaying", value: "Информация о текущем треке", inline: false },
+              { name: "/loop", value: "Включить/выключить повтор трека", inline: false },
+              { name: "/remove <номер>", value: "Удалить трек из очереди", inline: false },
               { name: "─── 🎉 Фан-команды (для всех) ───", value: "\u200b", inline: false },
               { name: "/8ball <вопрос>", value: "Магический шар предсказаний", inline: false },
               { name: "/coinflip", value: "Орёл или решка", inline: false },
@@ -722,6 +788,190 @@ client.on("interactionCreate", async (interaction) => {
             .setColor(0x57f287)
             .setTitle("🗑️ Предупреждения сброшены")
             .setDescription(`Удалено **${before}** предупреждений у ${target.tag}.`),
+        ],
+      });
+    }
+
+    else if (commandName === "play") {
+      const query = interaction.options.getString("запрос", true);
+      const member = interaction.member as GuildMember | null;
+      const voiceChannel = member?.voice?.channel;
+
+      if (!voiceChannel) {
+        await interaction.reply({ content: "❌ Ты должен быть в голосовом канале!", ephemeral: true });
+        return;
+      }
+
+      await interaction.deferReply();
+      const result = await addToQueue(voiceChannel, interaction.channelId, query, interaction.user.tag);
+
+      if ("error" in result) {
+        await interaction.editReply({ content: `❌ ${result.error}` });
+        return;
+      }
+
+      const { track, position } = result;
+      if (position === 1) {
+        await interaction.editReply({ content: "⏳ Загружаю трек..." });
+        await interaction.deleteReply().catch(() => {});
+      } else {
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x5865f2)
+              .setTitle("➕ Добавлено в очередь")
+              .setDescription(`**[${track.title}](${track.url})**`)
+              .addFields(
+                { name: "⏱ Длительность", value: track.duration || "?", inline: true },
+                { name: "📋 Позиция", value: `#${position}`, inline: true }
+              )
+              .setThumbnail(track.thumbnail || null),
+          ],
+        });
+      }
+    }
+
+    else if (commandName === "stop") {
+      const stopped = stopMusic(interaction.guildId!);
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(stopped ? 0xed4245 : 0xfee75c)
+            .setTitle(stopped ? "⏹️ Музыка остановлена" : "❌ Музыка не играет")
+            .setDescription(stopped ? "Бот покинул голосовой канал." : "Нечего останавливать."),
+        ],
+      });
+    }
+
+    else if (commandName === "skip") {
+      const skipped = skipTrack(interaction.guildId!);
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(skipped ? 0xffa500 : 0xfee75c)
+            .setTitle(skipped ? "⏭️ Трек пропущен" : "❌ Нечего пропускать")
+            .setDescription(skipped ? `Пропущен: **${skipped.title}**` : "Очередь пуста."),
+        ],
+      });
+    }
+
+    else if (commandName === "queue") {
+      const tracks = getQueueList(interaction.guildId!);
+      if (tracks.length === 0) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xfee75c)
+              .setTitle("📋 Очередь пуста")
+              .setDescription("Добавь треки через `/play`!"),
+          ],
+        });
+        return;
+      }
+
+      const loopStatus = isLooping(interaction.guildId!) ? " 🔁" : "";
+      const lines = tracks.map((t, i) =>
+        i === 0
+          ? `▶️ **${t.title}** — ${t.duration}`
+          : `\`${i + 1}.\` ${t.title} — ${t.duration}`
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`📋 Очередь${loopStatus}`)
+        .setDescription(lines.slice(0, 15).join("\n").slice(0, 4000))
+        .setFooter({ text: `Треков в очереди: ${tracks.length}` });
+
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    else if (commandName === "pause") {
+      const paused = pauseMusic(interaction.guildId!);
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(paused ? 0xfee75c : 0xed4245)
+            .setTitle(paused ? "⏸️ Пауза" : "❌ Не удалось поставить на паузу")
+            .setDescription(paused ? "Воспроизведение приостановлено. Продолжи с `/resume`." : "Музыка не играет."),
+        ],
+      });
+    }
+
+    else if (commandName === "resume") {
+      const resumed = resumeMusic(interaction.guildId!);
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(resumed ? 0x57f287 : 0xed4245)
+            .setTitle(resumed ? "▶️ Продолжаю" : "❌ Не на паузе")
+            .setDescription(resumed ? "Воспроизведение продолжено!" : "Музыка не на паузе."),
+        ],
+      });
+    }
+
+    else if (commandName === "nowplaying") {
+      const track = getNowPlaying(interaction.guildId!);
+      if (!track) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xfee75c)
+              .setTitle("❌ Сейчас ничего не играет")
+              .setDescription("Добавь трек через `/play`!"),
+          ],
+        });
+        return;
+      }
+
+      const loop = isLooping(interaction.guildId!) ? " 🔁" : "";
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x57f287)
+            .setTitle(`▶️ Сейчас играет${loop}`)
+            .setDescription(`**[${track.title}](${track.url})**`)
+            .addFields(
+              { name: "⏱ Длительность", value: track.duration || "?", inline: true },
+              { name: "👤 Запросил", value: track.requestedBy, inline: true }
+            )
+            .setThumbnail(track.thumbnail || null)
+            .setTimestamp(),
+        ],
+      });
+    }
+
+    else if (commandName === "loop") {
+      const loopState = toggleLoop(interaction.guildId!);
+      if (loopState === null) {
+        await interaction.reply({ content: "❌ Музыка не играет.", ephemeral: true });
+        return;
+      }
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(loopState ? 0x57f287 : 0xffa500)
+            .setTitle(loopState ? "🔁 Повтор включён" : "➡️ Повтор выключен")
+            .setDescription(loopState ? "Текущий трек будет повторяться." : "Треки играют по очереди."),
+        ],
+      });
+    }
+
+    else if (commandName === "remove") {
+      const pos = interaction.options.getInteger("номер", true);
+      const tracks = getQueueList(interaction.guildId!);
+
+      if (pos > tracks.length) {
+        await interaction.reply({ content: `❌ В очереди только ${tracks.length} трек(ов).`, ephemeral: true });
+        return;
+      }
+
+      const removed = removeFromQueue(interaction.guildId!, pos - 1);
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(removed ? 0xed4245 : 0xfee75c)
+            .setTitle(removed ? "🗑️ Трек удалён" : "❌ Не удалось удалить")
+            .setDescription(removed ? `Удалён: **${removed.title}**` : "Трек не найден."),
         ],
       });
     }
