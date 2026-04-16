@@ -8,9 +8,14 @@ import {
   PermissionFlagsBits,
   EmbedBuilder,
   GuildMember,
+  Message,
 } from "discord.js";
 import { logger } from "../lib/logger";
 import { openai } from "@workspace/integrations-openai-ai-server";
+
+const chatModeChannels = new Set<string>();
+
+const conversationHistory = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
 
 const token = process.env["DISCORD_BOT_TOKEN"];
 if (!token) {
@@ -123,6 +128,16 @@ const commands = [
     .addRoleOption((opt) =>
       opt.setName("роль").setDescription("Роль для выдачи/снятия").setRequired(true)
     ),
+
+  new SlashCommandBuilder()
+    .setName("chat")
+    .setDescription("Включить или выключить режим общения с ИИ в этом канале")
+    .addSubcommand((sub) =>
+      sub.setName("on").setDescription("Включить режим чата с ИИ")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("off").setDescription("Выключить режим чата с ИИ")
+    ),
 ];
 
 async function registerCommands(guildId: string) {
@@ -212,6 +227,8 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/unmute <пользователь>", value: "Снять мут (требует право Moderate Members)", inline: false },
               { name: "/purge <количество>", value: "Удалить сообщения (требует право Manage Messages)", inline: false },
               { name: "/role <пользователь> <роль>", value: "Выдать/снять роль (требует право Manage Roles)", inline: false },
+              { name: "/chat on", value: "Включить режим чата — бот будет отвечать на все сообщения в канале", inline: false },
+              { name: "/chat off", value: "Выключить режим чата", inline: false },
             )
             .setFooter({ text: "Бот создан с помощью Replit" }),
         ],
@@ -425,6 +442,39 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
     }
+
+    else if (commandName === "chat") {
+      const sub = interaction.options.getSubcommand();
+      const channelId = interaction.channelId;
+
+      if (sub === "on") {
+        chatModeChannels.add(channelId);
+        if (!conversationHistory.has(channelId)) {
+          conversationHistory.set(channelId, []);
+        }
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x57f287)
+              .setTitle("💬 Режим чата включён")
+              .setDescription(
+                "Теперь я буду отвечать на **каждое сообщение** в этом канале.\nЧтобы выключить — используй `/chat off`."
+              ),
+          ],
+        });
+      } else if (sub === "off") {
+        chatModeChannels.delete(channelId);
+        conversationHistory.delete(channelId);
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle("💬 Режим чата выключен")
+              .setDescription("Я больше не буду отвечать на обычные сообщения в этом канале."),
+          ],
+        });
+      }
+    }
   } catch (err) {
     logger.error({ err, commandName }, "Error handling slash command");
     const errMsg = "❌ Произошла ошибка при выполнении команды.";
@@ -433,6 +483,47 @@ client.on("interactionCreate", async (interaction) => {
     } else {
       await interaction.reply({ content: errMsg, ephemeral: true }).catch(() => {});
     }
+  }
+});
+
+client.on("messageCreate", async (message: Message) => {
+  if (message.author.bot) return;
+  if (!chatModeChannels.has(message.channelId)) return;
+  if (!message.content.trim()) return;
+
+  try {
+    await message.channel.sendTyping();
+
+    const history = conversationHistory.get(message.channelId) ?? [];
+
+    history.push({ role: "user", content: `${message.author.displayName}: ${message.content}` });
+
+    if (history.length > 40) {
+      history.splice(0, history.length - 40);
+    }
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5.2",
+      max_completion_tokens: 8192,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Ты дружелюбный и остроумный ИИ-ассистент в Discord. Общаешься непринуждённо и весело, как хороший друг. Используй Discord Markdown. Отвечай кратко — не более 3-4 предложений, если не просят подробнее. Не повторяй имя пользователя в каждом ответе.",
+        },
+        ...history,
+      ],
+    });
+
+    const reply = response.choices[0]?.message?.content ?? "Не могу ответить прямо сейчас.";
+
+    history.push({ role: "assistant", content: reply });
+    conversationHistory.set(message.channelId, history);
+
+    const truncated = reply.length > 2000 ? reply.slice(0, 1997) + "..." : reply;
+    await message.reply(truncated);
+  } catch (err) {
+    logger.error({ err }, "Error in chat mode response");
   }
 });
 
