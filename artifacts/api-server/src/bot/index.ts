@@ -245,6 +245,19 @@ client.on("interactionCreate", async (interaction) => {
 
   const { commandName } = interaction;
 
+  if (interaction.guild && interaction.user.id !== interaction.guild.ownerId) {
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xed4245)
+          .setTitle("🚫 Нет доступа")
+          .setDescription("Эти команды доступны только **создателю сервера**."),
+      ],
+      ephemeral: true,
+    });
+    return;
+  }
+
   try {
     if (commandName === "ping") {
       const latency = Date.now() - interaction.createdTimestamp;
