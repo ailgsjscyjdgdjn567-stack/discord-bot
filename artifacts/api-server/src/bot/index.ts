@@ -17,6 +17,30 @@ const chatModeChannels = new Set<string>();
 
 const conversationHistory = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
 
+interface Warning {
+  reason: string;
+  moderator: string;
+  timestamp: number;
+}
+
+const warnings = new Map<string, Map<string, Warning[]>>();
+
+function getUserWarnings(guildId: string, userId: string): Warning[] {
+  if (!warnings.has(guildId)) warnings.set(guildId, new Map());
+  const guildWarns = warnings.get(guildId)!;
+  if (!guildWarns.has(userId)) guildWarns.set(userId, []);
+  return guildWarns.get(userId)!;
+}
+
+function addWarning(guildId: string, userId: string, warn: Warning) {
+  const list = getUserWarnings(guildId, userId);
+  list.push(warn);
+}
+
+function clearWarnings(guildId: string, userId: string) {
+  warnings.get(guildId)?.set(userId, []);
+}
+
 const token = process.env["DISCORD_BOT_TOKEN"];
 if (!token) {
   throw new Error("DISCORD_BOT_TOKEN is required but not set.");
@@ -138,6 +162,33 @@ const commands = [
     .addSubcommand((sub) =>
       sub.setName("off").setDescription("Выключить режим чата с ИИ")
     ),
+
+  new SlashCommandBuilder()
+    .setName("warn")
+    .setDescription("Выдать предупреждение пользователю")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("Кому выдать варн").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("причина").setDescription("Причина предупреждения").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("warnings")
+    .setDescription("Посмотреть предупреждения пользователя")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("Чьи варны посмотреть").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("clearwarns")
+    .setDescription("Сбросить все предупреждения пользователя")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("У кого сбросить варны").setRequired(true)
+    ),
 ];
 
 async function registerCommands(guildId: string) {
@@ -229,6 +280,9 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/role <пользователь> <роль>", value: "Выдать/снять роль (требует право Manage Roles)", inline: false },
               { name: "/chat on", value: "Включить режим чата — бот будет отвечать на все сообщения в канале", inline: false },
               { name: "/chat off", value: "Выключить режим чата", inline: false },
+              { name: "/warn <пользователь> [причина]", value: "Выдать предупреждение (требует право Moderate Members)", inline: false },
+              { name: "/warnings <пользователь>", value: "Посмотреть все предупреждения пользователя", inline: false },
+              { name: "/clearwarns <пользователь>", value: "Сбросить все предупреждения пользователя", inline: false },
             )
             .setFooter({ text: "Бот создан с помощью Replit" }),
         ],
@@ -474,6 +528,107 @@ client.on("interactionCreate", async (interaction) => {
           ],
         });
       }
+    }
+
+    else if (commandName === "warn") {
+      const target = interaction.options.getMember("пользователь") as GuildMember | null;
+      const reason = interaction.options.getString("причина") ?? "Причина не указана";
+
+      if (!target) {
+        await interaction.reply({ content: "❌ Пользователь не найден.", ephemeral: true });
+        return;
+      }
+
+      if (target.user.bot) {
+        await interaction.reply({ content: "❌ Нельзя предупреждать ботов.", ephemeral: true });
+        return;
+      }
+
+      addWarning(interaction.guildId!, target.id, {
+        reason,
+        moderator: interaction.user.tag,
+        timestamp: Date.now(),
+      });
+
+      const warnCount = getUserWarnings(interaction.guildId!, target.id).length;
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle("⚠️ Предупреждение выдано")
+            .addFields(
+              { name: "Пользователь", value: `${target.user.tag}`, inline: true },
+              { name: "Предупреждений всего", value: `${warnCount}`, inline: true },
+              { name: "Причина", value: reason, inline: false },
+              { name: "Модератор", value: interaction.user.tag, inline: true },
+            )
+            .setTimestamp(),
+        ],
+      });
+
+      try {
+        await target.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xffa500)
+              .setTitle(`⚠️ Ты получил предупреждение на сервере ${interaction.guild!.name}`)
+              .addFields(
+                { name: "Причина", value: reason },
+                { name: "Предупреждений всего", value: `${warnCount}` },
+              )
+              .setTimestamp(),
+          ],
+        });
+      } catch {
+        // DM отключены — ничего страшного
+      }
+    }
+
+    else if (commandName === "warnings") {
+      const target = interaction.options.getUser("пользователь", true);
+      const warnList = getUserWarnings(interaction.guildId!, target.id);
+
+      if (warnList.length === 0) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x57f287)
+              .setTitle("✅ Предупреждений нет")
+              .setDescription(`У ${target.tag} нет ни одного предупреждения.`),
+          ],
+        });
+        return;
+      }
+
+      const lines = warnList.map((w, i) => {
+        const date = new Date(w.timestamp).toLocaleString("ru-RU");
+        return `**${i + 1}.** ${w.reason}\n_ Выдал:_ ${w.moderator} • ${date}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle(`⚠️ Предупреждения: ${target.tag}`)
+        .setDescription(lines.join("\n\n").slice(0, 4000))
+        .setFooter({ text: `Всего предупреждений: ${warnList.length}` })
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed] });
+    }
+
+    else if (commandName === "clearwarns") {
+      const target = interaction.options.getUser("пользователь", true);
+      const before = getUserWarnings(interaction.guildId!, target.id).length;
+      clearWarnings(interaction.guildId!, target.id);
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x57f287)
+            .setTitle("🗑️ Предупреждения сброшены")
+            .setDescription(`Удалено **${before}** предупреждений у ${target.tag}.`),
+        ],
+      });
     }
   } catch (err) {
     logger.error({ err, commandName }, "Error handling slash command");
