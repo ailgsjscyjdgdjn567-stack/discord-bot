@@ -299,21 +299,6 @@ client.on("interactionCreate", async (interaction) => {
 
   const { commandName } = interaction;
 
-  const publicCommands = new Set(["ask", "ping", "help", "info", "8ball", "coinflip", "dice", "joke", "poll", "avatar", "remind"]);
-
-  if (interaction.guild && interaction.user.id !== interaction.guild.ownerId && !publicCommands.has(commandName)) {
-    await interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xed4245)
-          .setTitle("🚫 Нет доступа")
-          .setDescription("Эти команды доступны только **создателю сервера**."),
-      ],
-      ephemeral: true,
-    });
-    return;
-  }
-
   try {
     if (commandName === "ping") {
       const latency = Date.now() - interaction.createdTimestamp;
@@ -348,7 +333,7 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/purge <количество>", value: "Удалить сообщения (требует право Manage Messages)", inline: false },
               { name: "/role <пользователь> <роль>", value: "Выдать/снять роль (требует право Manage Roles)", inline: false },
               { name: "/chat on / off", value: "Включить/выключить режим чата с ИИ в канале", inline: false },
-              { name: "/warn · /warnings · /clearwarns", value: "Система предупреждений (только создатель)", inline: false },
+              { name: "/warn · /warnings · /clearwarns", value: "Система предупреждений", inline: false },
               { name: "─── 🎉 Фан-команды (для всех) ───", value: "\u200b", inline: false },
               { name: "/8ball <вопрос>", value: "Магический шар предсказаний", inline: false },
               { name: "/coinflip", value: "Орёл или решка", inline: false },
