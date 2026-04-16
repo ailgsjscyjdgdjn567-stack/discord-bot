@@ -2,7 +2,17 @@
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+pnpm workspace monorepo using TypeScript. Each package manages its own dependencies. Includes a fully-featured Discord bot built with discord.js.
+
+## Discord Bot Features
+
+- **Приветствие** — автоматически приветствует новых участников в системном канале
+- **Slash-команды** — /ping, /help, /info, /ask, /ban, /kick, /mute, /unmute, /purge, /role
+- **Модерация** — бан, кик, мут (тайм-аут), удаление сообщений
+- **Роли** — выдача и снятие ролей
+- **ИИ** — /ask использует OpenAI GPT для ответов на вопросы
+
+Bot code: `artifacts/api-server/src/bot/index.ts`
 
 ## Stack
 
