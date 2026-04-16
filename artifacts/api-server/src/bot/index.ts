@@ -189,6 +189,60 @@ const commands = [
     .addUserOption((opt) =>
       opt.setName("пользователь").setDescription("У кого сбросить варны").setRequired(true)
     ),
+
+  new SlashCommandBuilder()
+    .setName("8ball")
+    .setDescription("Спроси магический шар")
+    .addStringOption((opt) =>
+      opt.setName("вопрос").setDescription("Твой вопрос").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("coinflip")
+    .setDescription("Подбросить монетку — орёл или решка"),
+
+  new SlashCommandBuilder()
+    .setName("dice")
+    .setDescription("Бросить кубик")
+    .addIntegerOption((opt) =>
+      opt
+        .setName("стороны")
+        .setDescription("Количество сторон кубика (по умолчанию 6)")
+        .setRequired(false)
+        .setMinValue(2)
+        .setMaxValue(1000)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("joke")
+    .setDescription("Случайная шутка"),
+
+  new SlashCommandBuilder()
+    .setName("poll")
+    .setDescription("Создать голосование")
+    .addStringOption((opt) =>
+      opt.setName("вопрос").setDescription("Вопрос для голосования").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("варианты").setDescription("Варианты через запятую (макс 9), например: Да, Нет, Не знаю").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("avatar")
+    .setDescription("Показать аватар пользователя")
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("Чей аватар показать (по умолчанию твой)").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("remind")
+    .setDescription("Установить напоминание")
+    .addIntegerOption((opt) =>
+      opt.setName("минуты").setDescription("Через сколько минут напомнить").setRequired(true).setMinValue(1).setMaxValue(1440)
+    )
+    .addStringOption((opt) =>
+      opt.setName("текст").setDescription("О чём напомнить").setRequired(true)
+    ),
 ];
 
 async function registerCommands(guildId: string) {
@@ -245,7 +299,9 @@ client.on("interactionCreate", async (interaction) => {
 
   const { commandName } = interaction;
 
-  if (interaction.guild && interaction.user.id !== interaction.guild.ownerId && commandName !== "ask") {
+  const publicCommands = new Set(["ask", "ping", "help", "info", "8ball", "coinflip", "dice", "joke", "poll", "avatar", "remind"]);
+
+  if (interaction.guild && interaction.user.id !== interaction.guild.ownerId && !publicCommands.has(commandName)) {
     await interaction.reply({
       embeds: [
         new EmbedBuilder()
@@ -291,11 +347,16 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/unmute <пользователь>", value: "Снять мут (требует право Moderate Members)", inline: false },
               { name: "/purge <количество>", value: "Удалить сообщения (требует право Manage Messages)", inline: false },
               { name: "/role <пользователь> <роль>", value: "Выдать/снять роль (требует право Manage Roles)", inline: false },
-              { name: "/chat on", value: "Включить режим чата — бот будет отвечать на все сообщения в канале", inline: false },
-              { name: "/chat off", value: "Выключить режим чата", inline: false },
-              { name: "/warn <пользователь> [причина]", value: "Выдать предупреждение (требует право Moderate Members)", inline: false },
-              { name: "/warnings <пользователь>", value: "Посмотреть все предупреждения пользователя", inline: false },
-              { name: "/clearwarns <пользователь>", value: "Сбросить все предупреждения пользователя", inline: false },
+              { name: "/chat on / off", value: "Включить/выключить режим чата с ИИ в канале", inline: false },
+              { name: "/warn · /warnings · /clearwarns", value: "Система предупреждений (только создатель)", inline: false },
+              { name: "─── 🎉 Фан-команды (для всех) ───", value: "\u200b", inline: false },
+              { name: "/8ball <вопрос>", value: "Магический шар предсказаний", inline: false },
+              { name: "/coinflip", value: "Орёл или решка", inline: false },
+              { name: "/dice [стороны]", value: "Бросить кубик", inline: false },
+              { name: "/joke", value: "Случайная шутка", inline: false },
+              { name: "/poll <вопрос> <варианты>", value: "Создать голосование с реакциями", inline: false },
+              { name: "/avatar [пользователь]", value: "Показать аватар", inline: false },
+              { name: "/remind <минуты> <текст>", value: "Установить напоминание (макс 24ч)", inline: false },
             )
             .setFooter({ text: "Бот создан с помощью Replit" }),
         ],
@@ -642,6 +703,157 @@ client.on("interactionCreate", async (interaction) => {
             .setDescription(`Удалено **${before}** предупреждений у ${target.tag}.`),
         ],
       });
+    }
+
+    else if (commandName === "8ball") {
+      const question = interaction.options.getString("вопрос", true);
+      const answers = [
+        "✅ Бесспорно!", "✅ Предрешено!", "✅ Без сомнений!", "✅ Определённо да!",
+        "✅ Можешь быть уверен в этом.", "🟡 Скорее всего.", "🟡 Хорошие перспективы.",
+        "🟡 Знаки говорят — да.", "🟡 Да.", "🟡 Пока не ясно, попробуй снова.",
+        "🟡 Спроси позже.", "🟡 Лучше не рассказывать.", "🟡 Сейчас нельзя предсказать.",
+        "❌ Не рассчитывай на это.", "❌ Мой ответ — нет.", "❌ По моим данным — нет.",
+        "❌ Перспективы не очень.", "❌ Весьма сомнительно.",
+      ];
+      const answer = answers[Math.floor(Math.random() * answers.length)];
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle("🎱 Магический шар")
+            .addFields(
+              { name: "Вопрос", value: question },
+              { name: "Ответ", value: answer },
+            ),
+        ],
+      });
+    }
+
+    else if (commandName === "coinflip") {
+      const result = Math.random() < 0.5 ? "🦅 Орёл" : "🪙 Решка";
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xfee75c)
+            .setTitle("🪙 Монетка")
+            .setDescription(`Выпало: **${result}**`),
+        ],
+      });
+    }
+
+    else if (commandName === "dice") {
+      const sides = interaction.options.getInteger("стороны") ?? 6;
+      const roll = Math.floor(Math.random() * sides) + 1;
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x57f287)
+            .setTitle(`🎲 Кубик d${sides}`)
+            .setDescription(`Выпало: **${roll}**`),
+        ],
+      });
+    }
+
+    else if (commandName === "joke") {
+      const jokes = [
+        "Почему программисты путают Хэллоуин и Рождество? Потому что Oct 31 == Dec 25!",
+        "Я думал, что буду лучше спать после того, как установил новое приложение для сна. Но потом оно попросило обновление.",
+        "Муж спрашивает жену: — Ты где?\n— Дома.\n— Странно, я тоже дома, но тебя не вижу...\n— Я имею в виду приложение Home.",
+        "Сказал другу, что изучаю Python. Он спросил: — А не опасно? Они же ядовитые.",
+        "Почему скелет не пошёл на вечеринку? Потому что ему было не с кем пойти — у него не было тела.",
+        "Почему Wi-Fi и жена похожи? Потому что если пропадают — сразу замечаешь.",
+        "— Кто сильнее: слон или муравей?\n— Муравей. Он может нести 50 своих масс.\n— А слон?\n— Слон может нести 50 муравьёв.",
+        "Пошёл к врачу. Говорю: — Доктор, я сломал руку в трёх местах. Он: — Не ходите в эти места.",
+      ];
+      const joke = jokes[Math.floor(Math.random() * jokes.length)];
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle("😂 Шутка дня")
+            .setDescription(joke),
+        ],
+      });
+    }
+
+    else if (commandName === "poll") {
+      const question = interaction.options.getString("вопрос", true);
+      const rawOptions = interaction.options.getString("варианты", true);
+      const options = rawOptions.split(",").map((o) => o.trim()).filter(Boolean).slice(0, 9);
+
+      if (options.length < 2) {
+        await interaction.reply({ content: "❌ Нужно минимум 2 варианта, разделённых запятой.", ephemeral: true });
+        return;
+      }
+
+      const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
+      const description = options.map((o, i) => `${emojis[i]} ${o}`).join("\n");
+
+      const pollMsg = await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle(`📊 ${question}`)
+            .setDescription(description)
+            .setFooter({ text: `Голосование создал ${interaction.user.tag}` })
+            .setTimestamp(),
+        ],
+        fetchReply: true,
+      });
+
+      for (let i = 0; i < options.length; i++) {
+        await pollMsg.react(emojis[i]!).catch(() => {});
+      }
+    }
+
+    else if (commandName === "avatar") {
+      const target = interaction.options.getUser("пользователь") ?? interaction.user;
+      const avatarUrl = target.displayAvatarURL({ size: 512 });
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle(`🖼️ Аватар — ${target.tag}`)
+            .setImage(avatarUrl)
+            .setURL(avatarUrl),
+        ],
+      });
+    }
+
+    else if (commandName === "remind") {
+      const minutes = interaction.options.getInteger("минуты", true);
+      const text = interaction.options.getString("текст", true);
+      const userId = interaction.user.id;
+      const channelId = interaction.channelId;
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x57f287)
+            .setTitle("⏰ Напоминание установлено")
+            .setDescription(`Напомню тебе через **${minutes} мин.**: ${text}`),
+        ],
+      });
+
+      setTimeout(async () => {
+        try {
+          const channel = await client.channels.fetch(channelId);
+          if (channel?.isTextBased() && !channel.isDMBased()) {
+            await (channel as import("discord.js").TextChannel).send({
+              content: `<@${userId}>`,
+              embeds: [
+                new EmbedBuilder()
+                  .setColor(0xfee75c)
+                  .setTitle("⏰ Напоминание!")
+                  .setDescription(text)
+                  .setTimestamp(),
+              ],
+            });
+          }
+        } catch (err) {
+          logger.error({ err }, "Failed to send reminder");
+        }
+      }, minutes * 60 * 1000);
     }
   } catch (err) {
     logger.error({ err, commandName }, "Error handling slash command");
