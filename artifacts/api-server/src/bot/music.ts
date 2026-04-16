@@ -107,10 +107,13 @@ export async function addToQueue(
     if (validated === "video") {
       const info = await play.video_info(query);
       videoDetails = info.video_details;
+    } else if (validated === "playlist") {
+      return { error: "Плейлисты пока не поддерживаются. Укажи ссылку на видео или название трека." };
     } else {
       const results = await play.search(query, { limit: 1, source: { youtube: "video" } });
-      if (!results.length) return { error: "Ничего не найдено по запросу." };
-      videoDetails = results[0];
+      if (!results.length || !results[0]?.id) return { error: "Ничего не найдено по запросу." };
+      const info = await play.video_info(`https://www.youtube.com/watch?v=${results[0].id}`);
+      videoDetails = info.video_details;
     }
   } catch (err) {
     logger.error({ err }, "Failed to search YouTube");

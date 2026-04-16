@@ -333,6 +333,79 @@ const commands = [
     .addStringOption((opt) =>
       opt.setName("текст").setDescription("О чём напомнить").setRequired(true)
     ),
+
+  new SlashCommandBuilder()
+    .setName("serverinfo")
+    .setDescription("Информация о сервере"),
+
+  new SlashCommandBuilder()
+    .setName("userinfo")
+    .setDescription("Информация о пользователе")
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("Чью информацию показать (по умолчанию твою)").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("roll")
+    .setDescription("Случайное число в диапазоне")
+    .addIntegerOption((opt) =>
+      opt.setName("мин").setDescription("Минимальное значение (по умолчанию 1)").setRequired(false).setMinValue(0)
+    )
+    .addIntegerOption((opt) =>
+      opt.setName("макс").setDescription("Максимальное значение (по умолчанию 100)").setRequired(false).setMaxValue(1000000)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("hug")
+    .setDescription("Обнять пользователя 🤗")
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("Кого обнять").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("ship")
+    .setDescription("Узнать совместимость двух пользователей 💘")
+    .addUserOption((opt) =>
+      opt.setName("пользователь1").setDescription("Первый пользователь").setRequired(true)
+    )
+    .addUserOption((opt) =>
+      opt.setName("пользователь2").setDescription("Второй пользователь").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("slowmode")
+    .setDescription("Установить медленный режим в канале (только для админов)")
+    .addIntegerOption((opt) =>
+      opt.setName("секунды").setDescription("Задержка в секундах (0 — выключить)").setRequired(true).setMinValue(0).setMaxValue(21600)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("lock")
+    .setDescription("Закрыть канал для отправки сообщений (только для админов)"),
+
+  new SlashCommandBuilder()
+    .setName("unlock")
+    .setDescription("Открыть канал для отправки сообщений (только для админов)"),
+
+  new SlashCommandBuilder()
+    .setName("nickname")
+    .setDescription("Сменить никнейм пользователя (только для админов)")
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("Кому менять никнейм").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("никнейм").setDescription("Новый никнейм (пусто — сбросить)").setRequired(false).setMaxLength(32)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("announce")
+    .setDescription("Отправить объявление в канал (только для админов)")
+    .addStringOption((opt) =>
+      opt.setName("текст").setDescription("Текст объявления").setRequired(true)
+    )
+    .addChannelOption((opt) =>
+      opt.setName("канал").setDescription("Куда отправить (по умолчанию текущий канал)").setRequired(false)
+    ),
 ];
 
 async function registerCommands(guildId: string) {
@@ -436,14 +509,25 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/nowplaying", value: "Информация о текущем треке", inline: false },
               { name: "/loop", value: "Включить/выключить повтор трека", inline: false },
               { name: "/remove <номер>", value: "Удалить трек из очереди", inline: false },
+              { name: "─── 📊 Информация (для всех) ───", value: "\u200b", inline: false },
+              { name: "/serverinfo", value: "Статистика сервера", inline: false },
+              { name: "/userinfo [пользователь]", value: "Профиль участника", inline: false },
+              { name: "/avatar [пользователь]", value: "Показать аватар", inline: false },
               { name: "─── 🎉 Фан-команды (для всех) ───", value: "\u200b", inline: false },
               { name: "/8ball <вопрос>", value: "Магический шар предсказаний", inline: false },
               { name: "/coinflip", value: "Орёл или решка", inline: false },
               { name: "/dice [стороны]", value: "Бросить кубик", inline: false },
+              { name: "/roll [мин] [макс]", value: "Случайное число в диапазоне", inline: false },
+              { name: "/hug <пользователь>", value: "Обнять участника 🤗", inline: false },
+              { name: "/ship <пользователь1> [пользователь2]", value: "Тест совместимости 💘", inline: false },
               { name: "/joke", value: "Случайная шутка", inline: false },
               { name: "/poll <вопрос> <варианты>", value: "Создать голосование с реакциями", inline: false },
-              { name: "/avatar [пользователь]", value: "Показать аватар", inline: false },
               { name: "/remind <минуты> <текст>", value: "Установить напоминание (макс 24ч)", inline: false },
+              { name: "─── 🛡️ Управление каналом (для админов) ───", value: "\u200b", inline: false },
+              { name: "/slowmode <секунды>", value: "Медленный режим (0 — выключить)", inline: false },
+              { name: "/lock / /unlock", value: "Закрыть / открыть канал для сообщений", inline: false },
+              { name: "/nickname <пользователь> [никнейм]", value: "Сменить никнейм участника", inline: false },
+              { name: "/announce <текст> [канал]", value: "Отправить объявление в канал", inline: false },
             )
             .setFooter({ text: "Бот создан с помощью Replit" }),
         ],
@@ -1231,6 +1315,258 @@ client.on("interactionCreate", async (interaction) => {
         }
       }, minutes * 60 * 1000);
     }
+    else if (commandName === "serverinfo") {
+      const guild = interaction.guild!;
+      await guild.members.fetch().catch(() => {});
+      const online = guild.members.cache.filter((m) => m.presence?.status !== "offline" && m.presence?.status !== undefined).size;
+      const bots = guild.members.cache.filter((m) => m.user.bot).size;
+      const humans = guild.memberCount - bots;
+      const roles = guild.roles.cache.size - 1;
+      const channels = guild.channels.cache.size;
+      const created = `<t:${Math.floor(guild.createdTimestamp / 1000)}:D>`;
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle(`📊 ${guild.name}`)
+            .setThumbnail(guild.iconURL() ?? null)
+            .addFields(
+              { name: "👑 Владелец", value: `<@${guild.ownerId}>`, inline: true },
+              { name: "📅 Создан", value: created, inline: true },
+              { name: "🌍 Регион", value: guild.preferredLocale || "Глобальный", inline: true },
+              { name: "👥 Участники", value: `${guild.memberCount} (людей: ${humans}, ботов: ${bots})`, inline: false },
+              { name: "💬 Каналы", value: `${channels}`, inline: true },
+              { name: "🎭 Ролей", value: `${roles}`, inline: true },
+              { name: "😀 Эмодзи", value: `${guild.emojis.cache.size}`, inline: true },
+              { name: "🔒 Верификация", value: String(guild.verificationLevel), inline: true },
+              { name: "🆔 ID сервера", value: guild.id, inline: false }
+            )
+            .setFooter({ text: `Запросил ${interaction.user.tag}` })
+            .setTimestamp(),
+        ],
+      });
+    }
+
+    else if (commandName === "userinfo") {
+      const target = interaction.options.getUser("пользователь") ?? interaction.user;
+      const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
+      const roles = member?.roles.cache
+        .filter((r) => r.id !== interaction.guild!.id)
+        .sort((a, b) => b.position - a.position)
+        .map((r) => `${r}`)
+        .slice(0, 10)
+        .join(" ") || "Нет ролей";
+
+      const joined = member?.joinedTimestamp
+        ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:D>`
+        : "Неизвестно";
+      const created = `<t:${Math.floor(target.createdTimestamp / 1000)}:D>`;
+      const badges = target.flags?.toArray().map((f) => f.toString()).join(", ") || "Нет";
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(member?.displayHexColor ?? 0x5865f2)
+            .setTitle(`👤 ${target.tag}`)
+            .setThumbnail(target.displayAvatarURL({ size: 256 }))
+            .addFields(
+              { name: "🆔 ID", value: target.id, inline: true },
+              { name: "🤖 Бот", value: target.bot ? "Да" : "Нет", inline: true },
+              { name: "📅 Зарегистрирован", value: created, inline: true },
+              { name: "📥 Вступил на сервер", value: joined, inline: true },
+              { name: "🏷️ Псевдоним", value: member?.nickname || "Нет", inline: true },
+              { name: "🎖️ Высшая роль", value: member?.roles.highest.toString() || "Нет", inline: true },
+              { name: `🎭 Роли (${member?.roles.cache.size ? member.roles.cache.size - 1 : 0})`, value: roles, inline: false },
+              { name: "🏅 Значки", value: badges, inline: false }
+            )
+            .setTimestamp(),
+        ],
+      });
+    }
+
+    else if (commandName === "roll") {
+      const min = interaction.options.getInteger("мин") ?? 1;
+      const max = interaction.options.getInteger("макс") ?? 100;
+      if (min >= max) {
+        await interaction.reply({ content: "❌ Минимум должен быть меньше максимума!", ephemeral: true });
+        return;
+      }
+      const result = Math.floor(Math.random() * (max - min + 1)) + min;
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle("🎲 Результат броска")
+            .setDescription(`**${result}**`)
+            .setFooter({ text: `Диапазон: ${min} – ${max} • ${interaction.user.tag}` }),
+        ],
+      });
+    }
+
+    else if (commandName === "hug") {
+      const target = interaction.options.getUser("пользователь", true);
+      const gifs = [
+        "https://media.tenor.com/qkFmWHqgEIoAAAAC/hug.gif",
+        "https://media.tenor.com/mOGWZFJuJnIAAAAC/hug-cute.gif",
+        "https://media.tenor.com/aKQ_x1vDJPoAAAAC/anime-hug.gif",
+        "https://media.tenor.com/tNrKq9-5s4kAAAAC/naruto-itachi.gif",
+        "https://media.tenor.com/ESLD6Mb_P7oAAAAC/hug-anime.gif",
+      ];
+      const gif = gifs[Math.floor(Math.random() * gifs.length)]!;
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xff69b4)
+            .setDescription(`💗 **${interaction.user.displayName}** обнимает **${target.displayName}**! 🤗`)
+            .setImage(gif),
+        ],
+      });
+    }
+
+    else if (commandName === "ship") {
+      const user1 = interaction.options.getUser("пользователь1", true);
+      const user2 = interaction.options.getUser("пользователь2") ?? interaction.user;
+      const combined = user1.id + user2.id;
+      let hash = 0;
+      for (const c of combined) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
+      const percent = Math.abs(hash) % 101;
+      const bar = "█".repeat(Math.floor(percent / 10)) + "░".repeat(10 - Math.floor(percent / 10));
+      const label = percent < 20 ? "💀 Нет шансов" : percent < 40 ? "😬 Слабо" : percent < 60 ? "🙂 Возможно" : percent < 80 ? "💖 Хорошие шансы" : "❤️‍🔥 Идеальная пара!";
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xff69b4)
+            .setTitle("💘 Ship-тест")
+            .setDescription(`**${user1.displayName}** ❤️ **${user2.displayName}**\n\n\`[${bar}]\` **${percent}%**\n\n${label}`),
+        ],
+      });
+    }
+
+    else if (commandName === "slowmode") {
+      if (!isAdminOrOwner(interaction.member as GuildMember)) {
+        await interaction.reply({ content: "❌ Только администраторы могут менять медленный режим.", ephemeral: true });
+        return;
+      }
+      const seconds = interaction.options.getInteger("секунды", true);
+      const channel = interaction.channel;
+      if (!channel || !channel.isTextBased() || channel.isDMBased() || !("setRateLimitPerUser" in channel)) {
+        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", ephemeral: true });
+        return;
+      }
+      await (channel as import("discord.js").TextChannel).setRateLimitPerUser(seconds, `Slowmode set by ${interaction.user.tag}`);
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle(seconds === 0 ? "✅ Медленный режим выключен" : `⏱️ Медленный режим: ${seconds}с`)
+            .setDescription(seconds === 0 ? "Ограничения сняты." : `Участники могут писать раз в **${seconds} секунд**.`),
+        ],
+      });
+    }
+
+    else if (commandName === "lock") {
+      if (!isAdminOrOwner(interaction.member as GuildMember)) {
+        await interaction.reply({ content: "❌ Только администраторы могут закрывать каналы.", ephemeral: true });
+        return;
+      }
+      const channel = interaction.channel;
+      if (!channel || !channel.isTextBased() || channel.isDMBased() || !("permissionOverwrites" in channel)) {
+        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", ephemeral: true });
+        return;
+      }
+      const everyoneRole = interaction.guild!.roles.everyone;
+      await (channel as import("discord.js").TextChannel).permissionOverwrites.edit(everyoneRole, {
+        SendMessages: false,
+      });
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xed4245)
+            .setTitle("🔒 Канал заблокирован")
+            .setDescription("Участники больше не могут отправлять сообщения в этот канал."),
+        ],
+      });
+    }
+
+    else if (commandName === "unlock") {
+      if (!isAdminOrOwner(interaction.member as GuildMember)) {
+        await interaction.reply({ content: "❌ Только администраторы могут открывать каналы.", ephemeral: true });
+        return;
+      }
+      const channel = interaction.channel;
+      if (!channel || !channel.isTextBased() || channel.isDMBased() || !("permissionOverwrites" in channel)) {
+        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", ephemeral: true });
+        return;
+      }
+      const everyoneRole = interaction.guild!.roles.everyone;
+      await (channel as import("discord.js").TextChannel).permissionOverwrites.edit(everyoneRole, {
+        SendMessages: null,
+      });
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x57f287)
+            .setTitle("🔓 Канал разблокирован")
+            .setDescription("Участники снова могут отправлять сообщения."),
+        ],
+      });
+    }
+
+    else if (commandName === "nickname") {
+      if (!isAdminOrOwner(interaction.member as GuildMember)) {
+        await interaction.reply({ content: "❌ Только администраторы могут менять никнеймы.", ephemeral: true });
+        return;
+      }
+      const target = interaction.options.getUser("пользователь", true);
+      const nick = interaction.options.getString("никнейм") ?? null;
+      const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
+      if (!member) {
+        await interaction.reply({ content: "❌ Пользователь не найден на сервере.", ephemeral: true });
+        return;
+      }
+      try {
+        await member.setNickname(nick, `Changed by ${interaction.user.tag}`);
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x5865f2)
+              .setTitle(nick ? "✏️ Никнейм изменён" : "✏️ Никнейм сброшен")
+              .addFields(
+                { name: "👤 Пользователь", value: `${target}`, inline: true },
+                { name: "🏷️ Новый никнейм", value: nick ?? target.username, inline: true }
+              ),
+          ],
+        });
+      } catch {
+        await interaction.reply({ content: "❌ Не удалось изменить никнейм. Возможно, у бота нет прав.", ephemeral: true });
+      }
+    }
+
+    else if (commandName === "announce") {
+      if (!isAdminOrOwner(interaction.member as GuildMember)) {
+        await interaction.reply({ content: "❌ Только администраторы могут делать объявления.", ephemeral: true });
+        return;
+      }
+      const text = interaction.options.getString("текст", true);
+      const targetChannel = interaction.options.getChannel("канал") ?? interaction.channel;
+      if (!targetChannel || !("send" in targetChannel)) {
+        await interaction.reply({ content: "❌ Не удалось получить канал.", ephemeral: true });
+        return;
+      }
+      await (targetChannel as import("discord.js").TextChannel).send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xfee75c)
+            .setTitle("📢 Объявление")
+            .setDescription(text)
+            .setFooter({ text: `От ${interaction.user.tag}` })
+            .setTimestamp(),
+        ],
+      });
+      await interaction.reply({ content: `✅ Объявление отправлено в ${targetChannel}.`, ephemeral: true });
+    }
+
   } catch (err) {
     logger.error({ err, commandName }, "Error handling slash command");
     const errMsg = "❌ Произошла ошибка при выполнении команды.";
