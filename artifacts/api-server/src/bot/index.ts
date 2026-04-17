@@ -12,7 +12,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ComponentType,
+  MessageFlags,
   TextChannel,
 } from "discord.js";
 import { logger } from "../lib/logger";
@@ -595,12 +595,12 @@ client.on("interactionCreate", async (interaction) => {
       const reason = interaction.options.getString("причина") ?? "Причина не указана";
 
       if (!target) {
-        await interaction.reply({ content: "❌ Пользователь не найден.", ephemeral: true });
+        await interaction.reply({ content: "❌ Пользователь не найден.", flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (!target.bannable) {
-        await interaction.reply({ content: "❌ Не могу забанить этого пользователя.", ephemeral: true });
+        await interaction.reply({ content: "❌ Не могу забанить этого пользователя.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -623,12 +623,12 @@ client.on("interactionCreate", async (interaction) => {
       const reason = interaction.options.getString("причина") ?? "Причина не указана";
 
       if (!target) {
-        await interaction.reply({ content: "❌ Пользователь не найден.", ephemeral: true });
+        await interaction.reply({ content: "❌ Пользователь не найден.", flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (!target.kickable) {
-        await interaction.reply({ content: "❌ Не могу кикнуть этого пользователя.", ephemeral: true });
+        await interaction.reply({ content: "❌ Не могу кикнуть этого пользователя.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -652,12 +652,12 @@ client.on("interactionCreate", async (interaction) => {
       const reason = interaction.options.getString("причина") ?? "Причина не указана";
 
       if (!target) {
-        await interaction.reply({ content: "❌ Пользователь не найден.", ephemeral: true });
+        await interaction.reply({ content: "❌ Пользователь не найден.", flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (!target.moderatable) {
-        await interaction.reply({ content: "❌ Не могу замьютить этого пользователя.", ephemeral: true });
+        await interaction.reply({ content: "❌ Не могу замьютить этого пользователя.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -681,7 +681,7 @@ client.on("interactionCreate", async (interaction) => {
       const target = interaction.options.getMember("пользователь") as GuildMember | null;
 
       if (!target) {
-        await interaction.reply({ content: "❌ Пользователь не найден.", ephemeral: true });
+        await interaction.reply({ content: "❌ Пользователь не найден.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -701,11 +701,11 @@ client.on("interactionCreate", async (interaction) => {
       const channel = interaction.channel;
 
       if (!channel || !channel.isTextBased() || channel.isDMBased()) {
-        await interaction.reply({ content: "❌ Команда доступна только в текстовых каналах.", ephemeral: true });
+        await interaction.reply({ content: "❌ Команда доступна только в текстовых каналах.", flags: MessageFlags.Ephemeral });
         return;
       }
 
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const deleted = await (channel as import("discord.js").TextChannel).bulkDelete(amount, true);
       await interaction.editReply({
         content: `✅ Удалено **${deleted.size}** сообщений.`,
@@ -717,7 +717,7 @@ client.on("interactionCreate", async (interaction) => {
       const role = interaction.options.getRole("роль");
 
       if (!target || !role) {
-        await interaction.reply({ content: "❌ Пользователь или роль не найдены.", ephemeral: true });
+        await interaction.reply({ content: "❌ Пользователь или роль не найдены.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -784,12 +784,12 @@ client.on("interactionCreate", async (interaction) => {
       const reason = interaction.options.getString("причина") ?? "Причина не указана";
 
       if (!target) {
-        await interaction.reply({ content: "❌ Пользователь не найден.", ephemeral: true });
+        await interaction.reply({ content: "❌ Пользователь не найден.", flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (target.user.bot) {
-        await interaction.reply({ content: "❌ Нельзя предупреждать ботов.", ephemeral: true });
+        await interaction.reply({ content: "❌ Нельзя предупреждать ботов.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -894,6 +894,10 @@ client.on("interactionCreate", async (interaction) => {
       };
       const res = await fetch("https://opentdb.com/api.php?amount=1&type=multiple&encode=url3986");
       const data = (await res.json()) as OpenTDBResponse;
+      if (data.response_code !== 0) {
+        await interaction.editReply({ content: "❌ Не удалось получить вопрос (лимит запросов). Попробуй через 5 секунд." });
+        return;
+      }
       const item = data.results[0];
       if (!item) {
         await interaction.editReply({ content: "❌ Не удалось получить вопрос. Попробуй позже." });
@@ -951,11 +955,11 @@ client.on("interactionCreate", async (interaction) => {
     else if (commandName === "rps") {
       const challenged = interaction.options.getUser("пользователь", true);
       if (challenged.id === interaction.user.id) {
-        await interaction.reply({ content: "❌ Нельзя вызвать самого себя!", ephemeral: true });
+        await interaction.reply({ content: "❌ Нельзя вызвать самого себя!", flags: MessageFlags.Ephemeral });
         return;
       }
       if (challenged.bot) {
-        await interaction.reply({ content: "❌ Нельзя вызвать бота!", ephemeral: true });
+        await interaction.reply({ content: "❌ Нельзя вызвать бота!", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -1013,12 +1017,16 @@ client.on("interactionCreate", async (interaction) => {
       type CatApiResponse = Array<{ url: string }>;
       const res = await fetch("https://api.thecatapi.com/v1/images/search");
       const [cat] = (await res.json()) as CatApiResponse;
+      if (!cat?.url) {
+        await interaction.editReply({ content: "❌ Не удалось загрузить фото котика. Попробуй ещё раз!" });
+        return;
+      }
       await interaction.editReply({
         embeds: [
           new EmbedBuilder()
             .setColor(0xff69b4)
             .setTitle("🐱 Котик!")
-            .setImage(cat?.url ?? null)
+            .setImage(cat.url)
             .setFooter({ text: "The Cat API" }),
         ],
       });
@@ -1029,12 +1037,17 @@ client.on("interactionCreate", async (interaction) => {
       type DogApiResponse = { message: string; status: string };
       const res = await fetch("https://dog.ceo/api/breeds/image/random");
       const dog = (await res.json()) as DogApiResponse;
+      const dogUrl = dog.status === "success" && dog.message?.startsWith("http") ? dog.message : null;
+      if (!dogUrl) {
+        await interaction.editReply({ content: "❌ Не удалось загрузить фото собачки. Попробуй ещё раз!" });
+        return;
+      }
       await interaction.editReply({
         embeds: [
           new EmbedBuilder()
             .setColor(0xa0522d)
             .setTitle("🐶 Собачка!")
-            .setImage(dog.message ?? null)
+            .setImage(dogUrl)
             .setFooter({ text: "dog.ceo API" }),
         ],
       });
@@ -1056,19 +1069,24 @@ client.on("interactionCreate", async (interaction) => {
 
     else if (commandName === "meme") {
       await interaction.deferReply();
-      type MemeApiResponse = { url: string; title: string; subreddit: string; postLink: string };
+      type MemeApiResponse = { url: string; title: string; subreddit: string; postLink: string; nsfw?: boolean };
       const res = await fetch("https://meme-api.com/gimme");
+      if (!res.ok) {
+        await interaction.editReply({ content: "❌ Не удалось загрузить мем. Попробуй позже!" });
+        return;
+      }
       const meme = (await res.json()) as MemeApiResponse;
-      await interaction.editReply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xff4500)
-            .setTitle(meme.title?.slice(0, 256) ?? "Мем")
-            .setURL(meme.postLink ?? null)
-            .setImage(meme.url ?? null)
-            .setFooter({ text: `r/${meme.subreddit ?? "memes"}` }),
-        ],
-      });
+      if (!meme.url || !meme.title) {
+        await interaction.editReply({ content: "❌ Мем-сервер вернул пустой ответ. Попробуй ещё раз!" });
+        return;
+      }
+      const embed = new EmbedBuilder()
+        .setColor(0xff4500)
+        .setTitle(meme.title.slice(0, 256))
+        .setImage(meme.url)
+        .setFooter({ text: `r/${meme.subreddit ?? "memes"}` });
+      if (meme.postLink) embed.setURL(meme.postLink);
+      await interaction.editReply({ embeds: [embed] });
     }
 
     else if (commandName === "secret") {
@@ -1083,7 +1101,7 @@ client.on("interactionCreate", async (interaction) => {
               .setTitle("🤫 Не так быстро!")
               .setDescription("Зайди в **голосовой канал** чтобы узнать секрет..."),
           ],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1124,7 +1142,7 @@ client.on("interactionCreate", async (interaction) => {
               .setTitle("🚫 Нет доступа")
               .setDescription("Команда `/say` доступна только **овнеру** и **администраторам** сервера."),
           ],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1137,13 +1155,13 @@ client.on("interactionCreate", async (interaction) => {
       if (channelOption) {
         const fetched = await interaction.guild!.channels.fetch(channelOption.id);
         if (!fetched || !fetched.isTextBased() || fetched.isDMBased()) {
-          await interaction.reply({ content: "❌ Указанный канал недоступен.", ephemeral: true });
+          await interaction.reply({ content: "❌ Указанный канал недоступен.", flags: MessageFlags.Ephemeral });
           return;
         }
         targetChannel = fetched as import("discord.js").TextChannel;
       } else {
         if (!interaction.channel || !interaction.channel.isTextBased() || interaction.channel.isDMBased()) {
-          await interaction.reply({ content: "❌ Текущий канал недоступен.", ephemeral: true });
+          await interaction.reply({ content: "❌ Текущий канал недоступен.", flags: MessageFlags.Ephemeral });
           return;
         }
         targetChannel = interaction.channel as import("discord.js").TextChannel;
@@ -1167,7 +1185,7 @@ client.on("interactionCreate", async (interaction) => {
             .setDescription(`Отправлено в <#${targetChannel.id}>`)
             .setFooter({ text: `ID сообщения: ${sent.id}` }),
         ],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -1181,7 +1199,7 @@ client.on("interactionCreate", async (interaction) => {
               .setTitle("🚫 Нет доступа")
               .setDescription("Команда `/whosaid` доступна только **овнеру** и **администраторам** сервера."),
           ],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1197,7 +1215,7 @@ client.on("interactionCreate", async (interaction) => {
               .setTitle("❓ Не найдено")
               .setDescription("Это сообщение не было отправлено через `/say`, или запись не сохранилась (бот перезапускался)."),
           ],
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1215,7 +1233,7 @@ client.on("interactionCreate", async (interaction) => {
               { name: "Текст", value: log.content.slice(0, 1024), inline: false },
             ),
         ],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -1296,7 +1314,7 @@ client.on("interactionCreate", async (interaction) => {
       const options = rawOptions.split(",").map((o) => o.trim()).filter(Boolean).slice(0, 9);
 
       if (options.length < 2) {
-        await interaction.reply({ content: "❌ Нужно минимум 2 варианта, разделённых запятой.", ephemeral: true });
+        await interaction.reply({ content: "❌ Нужно минимум 2 варианта, разделённых запятой.", flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -1371,8 +1389,6 @@ client.on("interactionCreate", async (interaction) => {
     }
     else if (commandName === "serverinfo") {
       const guild = interaction.guild!;
-      await guild.members.fetch().catch(() => {});
-      const online = guild.members.cache.filter((m) => m.presence?.status !== "offline" && m.presence?.status !== undefined).size;
       const bots = guild.members.cache.filter((m) => m.user.bot).size;
       const humans = guild.memberCount - bots;
       const roles = guild.roles.cache.size - 1;
@@ -1443,7 +1459,7 @@ client.on("interactionCreate", async (interaction) => {
       const min = interaction.options.getInteger("мин") ?? 1;
       const max = interaction.options.getInteger("макс") ?? 100;
       if (min >= max) {
-        await interaction.reply({ content: "❌ Минимум должен быть меньше максимума!", ephemeral: true });
+        await interaction.reply({ content: "❌ Минимум должен быть меньше максимума!", flags: MessageFlags.Ephemeral });
         return;
       }
       const result = Math.floor(Math.random() * (max - min + 1)) + min;
@@ -1499,13 +1515,13 @@ client.on("interactionCreate", async (interaction) => {
 
     else if (commandName === "slowmode") {
       if (!isAdminOrOwner(interaction.member as GuildMember)) {
-        await interaction.reply({ content: "❌ Только администраторы могут менять медленный режим.", ephemeral: true });
+        await interaction.reply({ content: "❌ Только администраторы могут менять медленный режим.", flags: MessageFlags.Ephemeral });
         return;
       }
       const seconds = interaction.options.getInteger("секунды", true);
       const channel = interaction.channel;
       if (!channel || !channel.isTextBased() || channel.isDMBased() || !("setRateLimitPerUser" in channel)) {
-        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", ephemeral: true });
+        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", flags: MessageFlags.Ephemeral });
         return;
       }
       await (channel as import("discord.js").TextChannel).setRateLimitPerUser(seconds, `Slowmode set by ${interaction.user.tag}`);
@@ -1521,12 +1537,12 @@ client.on("interactionCreate", async (interaction) => {
 
     else if (commandName === "lock") {
       if (!isAdminOrOwner(interaction.member as GuildMember)) {
-        await interaction.reply({ content: "❌ Только администраторы могут закрывать каналы.", ephemeral: true });
+        await interaction.reply({ content: "❌ Только администраторы могут закрывать каналы.", flags: MessageFlags.Ephemeral });
         return;
       }
       const channel = interaction.channel;
       if (!channel || !channel.isTextBased() || channel.isDMBased() || !("permissionOverwrites" in channel)) {
-        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", ephemeral: true });
+        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", flags: MessageFlags.Ephemeral });
         return;
       }
       const everyoneRole = interaction.guild!.roles.everyone;
@@ -1545,12 +1561,12 @@ client.on("interactionCreate", async (interaction) => {
 
     else if (commandName === "unlock") {
       if (!isAdminOrOwner(interaction.member as GuildMember)) {
-        await interaction.reply({ content: "❌ Только администраторы могут открывать каналы.", ephemeral: true });
+        await interaction.reply({ content: "❌ Только администраторы могут открывать каналы.", flags: MessageFlags.Ephemeral });
         return;
       }
       const channel = interaction.channel;
       if (!channel || !channel.isTextBased() || channel.isDMBased() || !("permissionOverwrites" in channel)) {
-        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", ephemeral: true });
+        await interaction.reply({ content: "❌ Эту команду можно использовать только в текстовых каналах.", flags: MessageFlags.Ephemeral });
         return;
       }
       const everyoneRole = interaction.guild!.roles.everyone;
@@ -1569,14 +1585,14 @@ client.on("interactionCreate", async (interaction) => {
 
     else if (commandName === "nickname") {
       if (!isAdminOrOwner(interaction.member as GuildMember)) {
-        await interaction.reply({ content: "❌ Только администраторы могут менять никнеймы.", ephemeral: true });
+        await interaction.reply({ content: "❌ Только администраторы могут менять никнеймы.", flags: MessageFlags.Ephemeral });
         return;
       }
       const target = interaction.options.getUser("пользователь", true);
       const nick = interaction.options.getString("никнейм") ?? null;
       const member = await interaction.guild!.members.fetch(target.id).catch(() => null);
       if (!member) {
-        await interaction.reply({ content: "❌ Пользователь не найден на сервере.", ephemeral: true });
+        await interaction.reply({ content: "❌ Пользователь не найден на сервере.", flags: MessageFlags.Ephemeral });
         return;
       }
       try {
@@ -1593,19 +1609,19 @@ client.on("interactionCreate", async (interaction) => {
           ],
         });
       } catch {
-        await interaction.reply({ content: "❌ Не удалось изменить никнейм. Возможно, у бота нет прав.", ephemeral: true });
+        await interaction.reply({ content: "❌ Не удалось изменить никнейм. Возможно, у бота нет прав.", flags: MessageFlags.Ephemeral });
       }
     }
 
     else if (commandName === "announce") {
       if (!isAdminOrOwner(interaction.member as GuildMember)) {
-        await interaction.reply({ content: "❌ Только администраторы могут делать объявления.", ephemeral: true });
+        await interaction.reply({ content: "❌ Только администраторы могут делать объявления.", flags: MessageFlags.Ephemeral });
         return;
       }
       const text = interaction.options.getString("текст", true);
       const targetChannel = interaction.options.getChannel("канал") ?? interaction.channel;
       if (!targetChannel || !("send" in targetChannel)) {
-        await interaction.reply({ content: "❌ Не удалось получить канал.", ephemeral: true });
+        await interaction.reply({ content: "❌ Не удалось получить канал.", flags: MessageFlags.Ephemeral });
         return;
       }
       await (targetChannel as import("discord.js").TextChannel).send({
@@ -1618,7 +1634,7 @@ client.on("interactionCreate", async (interaction) => {
             .setTimestamp(),
         ],
       });
-      await interaction.reply({ content: `✅ Объявление отправлено в ${targetChannel}.`, ephemeral: true });
+      await interaction.reply({ content: `✅ Объявление отправлено в ${targetChannel}.`, flags: MessageFlags.Ephemeral });
     }
 
   } catch (err) {
@@ -1627,7 +1643,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply({ content: errMsg }).catch(() => {});
     } else {
-      await interaction.reply({ content: errMsg, ephemeral: true }).catch(() => {});
+      await interaction.reply({ content: errMsg, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   }
 });
@@ -1643,12 +1659,12 @@ client.on("interactionCreate", async (interaction) => {
     const game = triviaGames.get(gameId);
 
     if (!game) {
-      await interaction.reply({ content: "❌ Игра уже завершена.", ephemeral: true });
+      await interaction.reply({ content: "❌ Игра уже завершена.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (game.answered) {
-      await interaction.reply({ content: "❌ Кто-то уже ответил!", ephemeral: true });
+      await interaction.reply({ content: "❌ Кто-то уже ответил!", flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -1698,12 +1714,12 @@ client.on("interactionCreate", async (interaction) => {
     const game = rpsGames.get(gameId);
 
     if (!game) {
-      await interaction.reply({ content: "❌ Игра уже завершена.", ephemeral: true });
+      await interaction.reply({ content: "❌ Игра уже завершена.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (interaction.user.id !== game.challengedId) {
-      await interaction.reply({ content: "❌ Ты не был вызван на этот бой!", ephemeral: true });
+      await interaction.reply({ content: "❌ Ты не был вызван на этот бой!", flags: MessageFlags.Ephemeral });
       return;
     }
 
