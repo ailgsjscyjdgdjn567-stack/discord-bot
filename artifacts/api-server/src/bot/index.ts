@@ -9,26 +9,37 @@ import {
   EmbedBuilder,
   GuildMember,
   Message,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+  TextChannel,
 } from "discord.js";
 import { logger } from "../lib/logger";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import {
-  initMusic,
-  addToQueue,
-  stopMusic,
-  skipTrack,
-  pauseMusic,
-  resumeMusic,
-  toggleLoop,
-  getNowPlaying,
-  getQueueList,
-  isLooping,
-  removeFromQueue,
-} from "./music";
 
 const chatModeChannels = new Set<string>();
 
 const conversationHistory = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
+
+interface TriviaGame {
+  correctAnswer: string;
+  allAnswers: string[];
+  question: string;
+  timeout: ReturnType<typeof setTimeout>;
+  answered: boolean;
+}
+const triviaGames = new Map<string, TriviaGame>();
+
+interface RpsGame {
+  challengerId: string;
+  challengerTag: string;
+  challengedId: string;
+  challengedTag: string;
+  challengerChoice: string;
+  channelId: string;
+}
+const rpsGames = new Map<string, RpsGame>();
 
 interface Warning {
   reason: string;
@@ -226,46 +237,34 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
-    .setName("play")
-    .setDescription("Включить музыку в голосовом канале")
+    .setName("trivia")
+    .setDescription("Вопрос из викторины! Ответь за 20 секунд 🧠"),
+
+  new SlashCommandBuilder()
+    .setName("rps")
+    .setDescription("Камень-ножницы-бумага против другого участника ✊")
+    .addUserOption((opt) =>
+      opt.setName("пользователь").setDescription("Кого вызвать").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("cat")
+    .setDescription("Случайное фото котика 🐱"),
+
+  new SlashCommandBuilder()
+    .setName("dog")
+    .setDescription("Случайное фото собачки 🐶"),
+
+  new SlashCommandBuilder()
+    .setName("mock")
+    .setDescription("СпАнЧ БоБ МоКаЕт ТеКсТ 🧽")
     .addStringOption((opt) =>
-      opt.setName("запрос").setDescription("Название трека или YouTube-ссылка").setRequired(true)
+      opt.setName("текст").setDescription("Текст для мока").setRequired(true)
     ),
 
   new SlashCommandBuilder()
-    .setName("stop")
-    .setDescription("Остановить музыку и выйти из канала"),
-
-  new SlashCommandBuilder()
-    .setName("skip")
-    .setDescription("Пропустить текущий трек"),
-
-  new SlashCommandBuilder()
-    .setName("queue")
-    .setDescription("Показать очередь треков"),
-
-  new SlashCommandBuilder()
-    .setName("pause")
-    .setDescription("Поставить музыку на паузу"),
-
-  new SlashCommandBuilder()
-    .setName("resume")
-    .setDescription("Продолжить воспроизведение"),
-
-  new SlashCommandBuilder()
-    .setName("nowplaying")
-    .setDescription("Показать информацию о текущем треке"),
-
-  new SlashCommandBuilder()
-    .setName("loop")
-    .setDescription("Включить/выключить повтор текущего трека"),
-
-  new SlashCommandBuilder()
-    .setName("remove")
-    .setDescription("Удалить трек из очереди")
-    .addIntegerOption((opt) =>
-      opt.setName("номер").setDescription("Номер трека в очереди").setRequired(true).setMinValue(2)
-    ),
+    .setName("meme")
+    .setDescription("Случайный мем из Reddit 😂"),
 
   new SlashCommandBuilder()
     .setName("say")
@@ -422,7 +421,6 @@ async function registerCommands(guildId: string) {
 }
 
 client.once("ready", async () => {
-  initMusic(client);
   logger.info({ tag: client.user?.tag }, "Discord bot ready");
   for (const guild of client.guilds.cache.values()) {
     try {
@@ -504,15 +502,6 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/warn · /warnings · /clearwarns", value: "Система предупреждений", inline: false },
               { name: "/say <текст> [канал]", value: "Написать от лица бота (овнер и администраторы)", inline: false },
               { name: "/whosaid <id>", value: "Узнать кто написал через /say (овнер и администраторы)", inline: false },
-              { name: "─── 🎵 Музыка (для всех) ───", value: "\u200b", inline: false },
-              { name: "/play <запрос>", value: "Включить музыку по названию или YouTube-ссылке", inline: false },
-              { name: "/stop", value: "Остановить музыку и выйти из канала", inline: false },
-              { name: "/skip", value: "Пропустить текущий трек", inline: false },
-              { name: "/queue", value: "Показать очередь треков", inline: false },
-              { name: "/pause / /resume", value: "Пауза / Продолжить воспроизведение", inline: false },
-              { name: "/nowplaying", value: "Информация о текущем треке", inline: false },
-              { name: "/loop", value: "Включить/выключить повтор трека", inline: false },
-              { name: "/remove <номер>", value: "Удалить трек из очереди", inline: false },
               { name: "─── 📊 Информация (для всех) ───", value: "\u200b", inline: false },
               { name: "/serverinfo", value: "Статистика сервера", inline: false },
               { name: "/userinfo [пользователь]", value: "Профиль участника", inline: false },
@@ -521,6 +510,11 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/8ball <вопрос>", value: "Магический шар предсказаний", inline: false },
               { name: "/coinflip", value: "Орёл или решка", inline: false },
               { name: "/dice [стороны]", value: "Бросить кубик", inline: false },
+              { name: "/trivia", value: "Вопрос викторины — ответь за 20 секунд 🧠", inline: false },
+              { name: "/rps <пользователь>", value: "Камень-ножницы-бумага ✊", inline: false },
+              { name: "/cat / /dog", value: "Случайное фото котика или собачки", inline: false },
+              { name: "/mock <текст>", value: "СпАнЧ БоБ МоКаЕт 🧽", inline: false },
+              { name: "/meme", value: "Случайный мем из Reddit 😂", inline: false },
               { name: "/roll [мин] [макс]", value: "Случайное число в диапазоне", inline: false },
               { name: "/hug <пользователь>", value: "Обнять участника 🤗", inline: false },
               { name: "/ship <пользователь1> [пользователь2]", value: "Тест совместимости 💘", inline: false },
@@ -880,186 +874,193 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    else if (commandName === "play") {
-      const query = interaction.options.getString("запрос", true);
-      const member = interaction.member as GuildMember | null;
-      const voiceChannel = member?.voice?.channel;
-
-      if (!voiceChannel) {
-        await interaction.reply({ content: "❌ Ты должен быть в голосовом канале!", ephemeral: true });
-        return;
-      }
-
+    else if (commandName === "trivia") {
       await interaction.deferReply();
-      const result = await addToQueue(voiceChannel, interaction.channelId, query, interaction.user.tag);
-
-      if ("error" in result) {
-        await interaction.editReply({ content: `❌ ${result.error}` });
+      type OpenTDBResponse = {
+        response_code: number;
+        results: Array<{
+          question: string;
+          correct_answer: string;
+          incorrect_answers: string[];
+          category: string;
+          difficulty: string;
+        }>;
+      };
+      const res = await fetch("https://opentdb.com/api.php?amount=1&type=multiple&encode=url3986");
+      const data = (await res.json()) as OpenTDBResponse;
+      const item = data.results[0];
+      if (!item) {
+        await interaction.editReply({ content: "❌ Не удалось получить вопрос. Попробуй позже." });
         return;
       }
+      const decode = (s: string) => decodeURIComponent(s);
+      const question = decode(item.question);
+      const correct = decode(item.correct_answer);
+      const wrong = item.incorrect_answers.map(decode);
+      const all = [...wrong, correct].sort(() => Math.random() - 0.5);
+      const labels = ["🇦 A", "🇧 B", "🇨 C", "🇩 D"];
+      const gameId = `${interaction.channelId}_${interaction.user.id}_${Date.now()}`;
 
-      const { track, position } = result;
-      if (position === 1) {
-        await interaction.editReply({ content: "⏳ Загружаю трек..." });
-        await interaction.deleteReply().catch(() => {});
-      } else {
-        await interaction.editReply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0x5865f2)
-              .setTitle("➕ Добавлено в очередь")
-              .setDescription(`**[${track.title}](${track.url})**`)
-              .addFields(
-                { name: "⏱ Длительность", value: track.duration || "?", inline: true },
-                { name: "📋 Позиция", value: `#${position}`, inline: true }
-              )
-              .setThumbnail(track.thumbnail || null),
-          ],
-        });
-      }
-    }
-
-    else if (commandName === "stop") {
-      const stopped = stopMusic(interaction.guildId!);
-      await interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(stopped ? 0xed4245 : 0xfee75c)
-            .setTitle(stopped ? "⏹️ Музыка остановлена" : "❌ Музыка не играет")
-            .setDescription(stopped ? "Бот покинул голосовой канал." : "Нечего останавливать."),
-        ],
-      });
-    }
-
-    else if (commandName === "skip") {
-      const skipped = skipTrack(interaction.guildId!);
-      await interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(skipped ? 0xffa500 : 0xfee75c)
-            .setTitle(skipped ? "⏭️ Трек пропущен" : "❌ Нечего пропускать")
-            .setDescription(skipped ? `Пропущен: **${skipped.title}**` : "Очередь пуста."),
-        ],
-      });
-    }
-
-    else if (commandName === "queue") {
-      const tracks = getQueueList(interaction.guildId!);
-      if (tracks.length === 0) {
-        await interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0xfee75c)
-              .setTitle("📋 Очередь пуста")
-              .setDescription("Добавь треки через `/play`!"),
-          ],
-        });
-        return;
-      }
-
-      const loopStatus = isLooping(interaction.guildId!) ? " 🔁" : "";
-      const lines = tracks.map((t, i) =>
-        i === 0
-          ? `▶️ **${t.title}** — ${t.duration}`
-          : `\`${i + 1}.\` ${t.title} — ${t.duration}`
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        all.map((ans, i) =>
+          new ButtonBuilder()
+            .setCustomId(`trivia_${gameId}_${i}`)
+            .setLabel(`${labels[i]}: ${ans.slice(0, 70)}`)
+            .setStyle(ButtonStyle.Primary)
+        )
       );
 
       const embed = new EmbedBuilder()
         .setColor(0x5865f2)
-        .setTitle(`📋 Очередь${loopStatus}`)
-        .setDescription(lines.slice(0, 15).join("\n").slice(0, 4000))
-        .setFooter({ text: `Треков в очереди: ${tracks.length}` });
+        .setTitle("🧠 Викторина!")
+        .setDescription(`**${question}**`)
+        .addFields({ name: "Сложность", value: decode(item.difficulty), inline: true }, { name: "Категория", value: decode(item.category), inline: true })
+        .setFooter({ text: "У тебя 20 секунд!" });
 
-      await interaction.reply({ embeds: [embed] });
+      const msg = await interaction.editReply({ embeds: [embed], components: [row] });
+
+      const timeout = setTimeout(async () => {
+        const game = triviaGames.get(gameId);
+        if (!game || game.answered) return;
+        triviaGames.delete(gameId);
+        const correctIdx = all.indexOf(correct);
+        const expiredRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          all.map((ans, i) =>
+            new ButtonBuilder()
+              .setCustomId(`trivia_expired_${i}`)
+              .setLabel(`${labels[i]}: ${ans.slice(0, 70)}`)
+              .setStyle(i === correctIdx ? ButtonStyle.Success : ButtonStyle.Secondary)
+              .setDisabled(true)
+          )
+        );
+        await msg.edit({
+          embeds: [embed.setColor(0xed4245).setFooter({ text: `⏰ Время вышло! Правильный ответ: ${correct}` })],
+          components: [expiredRow],
+        }).catch(() => {});
+      }, 20_000);
+
+      triviaGames.set(gameId, { question, correctAnswer: correct, allAnswers: all, timeout, answered: false });
     }
 
-    else if (commandName === "pause") {
-      const paused = pauseMusic(interaction.guildId!);
-      await interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(paused ? 0xfee75c : 0xed4245)
-            .setTitle(paused ? "⏸️ Пауза" : "❌ Не удалось поставить на паузу")
-            .setDescription(paused ? "Воспроизведение приостановлено. Продолжи с `/resume`." : "Музыка не играет."),
-        ],
-      });
-    }
-
-    else if (commandName === "resume") {
-      const resumed = resumeMusic(interaction.guildId!);
-      await interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(resumed ? 0x57f287 : 0xed4245)
-            .setTitle(resumed ? "▶️ Продолжаю" : "❌ Не на паузе")
-            .setDescription(resumed ? "Воспроизведение продолжено!" : "Музыка не на паузе."),
-        ],
-      });
-    }
-
-    else if (commandName === "nowplaying") {
-      const track = getNowPlaying(interaction.guildId!);
-      if (!track) {
-        await interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0xfee75c)
-              .setTitle("❌ Сейчас ничего не играет")
-              .setDescription("Добавь трек через `/play`!"),
-          ],
-        });
+    else if (commandName === "rps") {
+      const challenged = interaction.options.getUser("пользователь", true);
+      if (challenged.id === interaction.user.id) {
+        await interaction.reply({ content: "❌ Нельзя вызвать самого себя!", ephemeral: true });
+        return;
+      }
+      if (challenged.bot) {
+        await interaction.reply({ content: "❌ Нельзя вызвать бота!", ephemeral: true });
         return;
       }
 
-      const loop = isLooping(interaction.guildId!) ? " 🔁" : "";
+      const gameId = `rps_${interaction.id}`;
+      const choices = ["✊ Камень", "✌️ Ножницы", "🖐️ Бумага"];
+      const challengerChoice = choices[Math.floor(Math.random() * choices.length)]!;
+
+      rpsGames.set(gameId, {
+        challengerId: interaction.user.id,
+        challengerTag: interaction.user.tag,
+        challengedId: challenged.id,
+        challengedTag: challenged.tag,
+        challengerChoice,
+        channelId: interaction.channelId,
+      });
+
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        choices.map((c) =>
+          new ButtonBuilder()
+            .setCustomId(`rps_${gameId}_${c}`)
+            .setLabel(c)
+            .setStyle(ButtonStyle.Primary)
+        )
+      );
+
       await interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(0x57f287)
-            .setTitle(`▶️ Сейчас играет${loop}`)
-            .setDescription(`**[${track.title}](${track.url})**`)
-            .addFields(
-              { name: "⏱ Длительность", value: track.duration || "?", inline: true },
-              { name: "👤 Запросил", value: track.requestedBy, inline: true }
+            .setColor(0x5865f2)
+            .setTitle("⚔️ Вызов брошен!")
+            .setDescription(`**${interaction.user.displayName}** вызывает **${challenged.displayName}** на бой!\n\n${challenged}, выбери свой ход! У тебя 30 секунд.`)
+            .setFooter({ text: "Только вызванный участник может ответить" }),
+        ],
+        components: [row],
+      });
+
+      setTimeout(async () => {
+        if (rpsGames.has(gameId)) {
+          rpsGames.delete(gameId);
+          const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            choices.map((c) =>
+              new ButtonBuilder().setCustomId(`rps_expired_${c}`).setLabel(c).setStyle(ButtonStyle.Secondary).setDisabled(true)
             )
-            .setThumbnail(track.thumbnail || null)
-            .setTimestamp(),
+          );
+          await interaction.editReply({
+            embeds: [new EmbedBuilder().setColor(0xed4245).setTitle("⏰ Время вышло!").setDescription(`${challenged} не ответил вовремя.`)],
+            components: [disabledRow],
+          }).catch(() => {});
+        }
+      }, 30_000);
+    }
+
+    else if (commandName === "cat") {
+      await interaction.deferReply();
+      type CatApiResponse = Array<{ url: string }>;
+      const res = await fetch("https://api.thecatapi.com/v1/images/search");
+      const [cat] = (await res.json()) as CatApiResponse;
+      await interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xff69b4)
+            .setTitle("🐱 Котик!")
+            .setImage(cat?.url ?? null)
+            .setFooter({ text: "The Cat API" }),
         ],
       });
     }
 
-    else if (commandName === "loop") {
-      const loopState = toggleLoop(interaction.guildId!);
-      if (loopState === null) {
-        await interaction.reply({ content: "❌ Музыка не играет.", ephemeral: true });
-        return;
-      }
-      await interaction.reply({
+    else if (commandName === "dog") {
+      await interaction.deferReply();
+      type DogApiResponse = { message: string; status: string };
+      const res = await fetch("https://dog.ceo/api/breeds/image/random");
+      const dog = (await res.json()) as DogApiResponse;
+      await interaction.editReply({
         embeds: [
           new EmbedBuilder()
-            .setColor(loopState ? 0x57f287 : 0xffa500)
-            .setTitle(loopState ? "🔁 Повтор включён" : "➡️ Повтор выключен")
-            .setDescription(loopState ? "Текущий трек будет повторяться." : "Треки играют по очереди."),
+            .setColor(0xa0522d)
+            .setTitle("🐶 Собачка!")
+            .setImage(dog.message ?? null)
+            .setFooter({ text: "dog.ceo API" }),
         ],
       });
     }
 
-    else if (commandName === "remove") {
-      const pos = interaction.options.getInteger("номер", true);
-      const tracks = getQueueList(interaction.guildId!);
-
-      if (pos > tracks.length) {
-        await interaction.reply({ content: `❌ В очереди только ${tracks.length} трек(ов).`, ephemeral: true });
-        return;
-      }
-
-      const removed = removeFromQueue(interaction.guildId!, pos - 1);
+    else if (commandName === "mock") {
+      const text = interaction.options.getString("текст", true);
+      const mocked = text.split("").map((c, i) => (i % 2 === 0 ? c.toLowerCase() : c.toUpperCase())).join("");
       await interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor(removed ? 0xed4245 : 0xfee75c)
-            .setTitle(removed ? "🗑️ Трек удалён" : "❌ Не удалось удалить")
-            .setDescription(removed ? `Удалён: **${removed.title}**` : "Трек не найден."),
+            .setColor(0xfee75c)
+            .setTitle("🧽 СпАнЧ БоБ МоКаЕт")
+            .setDescription(`\`\`\`${mocked}\`\`\``)
+            .setThumbnail("https://i.imgur.com/K6NHXSC.png"),
+        ],
+      });
+    }
+
+    else if (commandName === "meme") {
+      await interaction.deferReply();
+      type MemeApiResponse = { url: string; title: string; subreddit: string; postLink: string };
+      const res = await fetch("https://meme-api.com/gimme");
+      const meme = (await res.json()) as MemeApiResponse;
+      await interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xff4500)
+            .setTitle(meme.title?.slice(0, 256) ?? "Мем")
+            .setURL(meme.postLink ?? null)
+            .setImage(meme.url ?? null)
+            .setFooter({ text: `r/${meme.subreddit ?? "memes"}` }),
         ],
       });
     }
@@ -1579,6 +1580,127 @@ client.on("interactionCreate", async (interaction) => {
     } else {
       await interaction.reply({ content: errMsg, ephemeral: true }).catch(() => {});
     }
+  }
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isButton()) return;
+  const { customId } = interaction;
+
+  if (customId.startsWith("trivia_") && !customId.startsWith("trivia_expired")) {
+    const parts = customId.split("_");
+    const answerIdx = parseInt(parts[parts.length - 1]!);
+    const gameId = parts.slice(1, -1).join("_");
+    const game = triviaGames.get(gameId);
+
+    if (!game) {
+      await interaction.reply({ content: "❌ Игра уже завершена.", ephemeral: true });
+      return;
+    }
+
+    if (game.answered) {
+      await interaction.reply({ content: "❌ Кто-то уже ответил!", ephemeral: true });
+      return;
+    }
+
+    game.answered = true;
+    clearTimeout(game.timeout);
+    triviaGames.delete(gameId);
+
+    const chosen = game.allAnswers[answerIdx];
+    const correct = game.correctAnswer;
+    const isCorrect = chosen === correct;
+    const labels = ["🇦 A", "🇧 B", "🇨 C", "🇩 D"];
+    const correctIdx = game.allAnswers.indexOf(correct);
+
+    const resultRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      game.allAnswers.map((ans, i) =>
+        new ButtonBuilder()
+          .setCustomId(`trivia_done_${i}`)
+          .setLabel(`${labels[i]}: ${ans.slice(0, 70)}`)
+          .setStyle(i === answerIdx && !isCorrect ? ButtonStyle.Danger : i === correctIdx ? ButtonStyle.Success : ButtonStyle.Secondary)
+          .setDisabled(true)
+      )
+    );
+
+    await interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(isCorrect ? 0x57f287 : 0xed4245)
+          .setTitle(isCorrect ? "✅ Правильно!" : "❌ Неправильно!")
+          .setDescription(`**${game.question}**`)
+          .addFields(
+            { name: isCorrect ? "🎉 Ответ" : "😔 Твой ответ", value: chosen ?? "?", inline: true },
+            { name: "✅ Правильный ответ", value: correct, inline: true },
+            { name: "👤 Ответил", value: interaction.user.displayName, inline: true }
+          ),
+      ],
+      components: [resultRow],
+    });
+    return;
+  }
+
+  if (customId.startsWith("rps_") && !customId.startsWith("rps_expired") && !customId.startsWith("rps_done")) {
+    const withoutPrefix = customId.slice("rps_".length);
+    const lastUnder = withoutPrefix.lastIndexOf("_");
+    if (lastUnder === -1) return;
+    const gameId = withoutPrefix.slice(0, lastUnder);
+    const choice = withoutPrefix.slice(lastUnder + 1);
+    const game = rpsGames.get(gameId);
+
+    if (!game) {
+      await interaction.reply({ content: "❌ Игра уже завершена.", ephemeral: true });
+      return;
+    }
+
+    if (interaction.user.id !== game.challengedId) {
+      await interaction.reply({ content: "❌ Ты не был вызван на этот бой!", ephemeral: true });
+      return;
+    }
+
+    rpsGames.delete(gameId);
+
+    const c1 = game.challengerChoice;
+    const c2 = choice;
+    const wins: Record<string, string> = {
+      "✊ Камень": "✌️ Ножницы",
+      "✌️ Ножницы": "🖐️ Бумага",
+      "🖐️ Бумага": "✊ Камень",
+    };
+
+    let resultText: string;
+    let color: number;
+    if (c1 === c2) {
+      resultText = "🤝 Ничья!";
+      color = 0xfee75c;
+    } else if (wins[c1] === c2) {
+      resultText = `🏆 Победил **${game.challengerTag}**!`;
+      color = 0x57f287;
+    } else {
+      resultText = `🏆 Победил **${game.challengedTag}**!`;
+      color = 0x57f287;
+    }
+
+    const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ["✊ Камень", "✌️ Ножницы", "🖐️ Бумага"].map((c) =>
+        new ButtonBuilder().setCustomId(`rps_done_${c}`).setLabel(c).setStyle(ButtonStyle.Secondary).setDisabled(true)
+      )
+    );
+
+    await interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle("⚔️ Камень-Ножницы-Бумага")
+          .addFields(
+            { name: `✊ ${game.challengerTag}`, value: c1, inline: true },
+            { name: "VS", value: "⚔️", inline: true },
+            { name: `✊ ${game.challengedTag}`, value: c2, inline: true }
+          )
+          .setDescription(resultText),
+      ],
+      components: [disabledRow],
+    });
   }
 });
 
