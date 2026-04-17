@@ -64,10 +64,14 @@ interface SayLog {
 
 const sayLog = new Map<string, SayLog>();
 
-function isAdminOrOwner(member: GuildMember, guild: import("discord.js").Guild): boolean {
+const CREATOR_ROLE_NAME = "создатель";
+
+function isAdminOrOwner(member: GuildMember, guild?: import("discord.js").Guild): boolean {
+  const g = guild ?? member.guild;
   return (
-    member.id === guild.ownerId ||
-    member.permissions.has(PermissionFlagsBits.Administrator)
+    member.id === g.ownerId ||
+    member.permissions.has(PermissionFlagsBits.Administrator) ||
+    member.roles.cache.some((r) => r.name.toLowerCase() === CREATOR_ROLE_NAME)
   );
 }
 
