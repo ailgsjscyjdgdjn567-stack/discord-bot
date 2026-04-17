@@ -17,6 +17,7 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { playSecretSong } from "./secret";
 
 const chatModeChannels = new Set<string>();
 
@@ -267,6 +268,10 @@ const commands = [
     .setDescription("Случайный мем из Reddit 😂"),
 
   new SlashCommandBuilder()
+    .setName("secret")
+    .setDescription("🤫 Секрет... (войди в голосовой канал сначала)"),
+
+  new SlashCommandBuilder()
     .setName("say")
     .setDescription("Отправить сообщение от лица бота (только для овнера и админов)")
     .addStringOption((opt) =>
@@ -515,6 +520,7 @@ client.on("interactionCreate", async (interaction) => {
               { name: "/cat / /dog", value: "Случайное фото котика или собачки", inline: false },
               { name: "/mock <текст>", value: "СпАнЧ БоБ МоКаЕт 🧽", inline: false },
               { name: "/meme", value: "Случайный мем из Reddit 😂", inline: false },
+              { name: "/secret", value: "🤫 Зайди в голосовой — узнаешь сам!", inline: false },
               { name: "/roll [мин] [макс]", value: "Случайное число в диапазоне", inline: false },
               { name: "/hug <пользователь>", value: "Обнять участника 🤗", inline: false },
               { name: "/ship <пользователь1> [пользователь2]", value: "Тест совместимости 💘", inline: false },
@@ -1061,6 +1067,49 @@ client.on("interactionCreate", async (interaction) => {
             .setURL(meme.postLink ?? null)
             .setImage(meme.url ?? null)
             .setFooter({ text: `r/${meme.subreddit ?? "memes"}` }),
+        ],
+      });
+    }
+
+    else if (commandName === "secret") {
+      const member = interaction.member as GuildMember | null;
+      const voiceChannel = member?.voice?.channel;
+
+      if (!voiceChannel) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle("🤫 Не так быстро!")
+              .setDescription("Зайди в **голосовой канал** чтобы узнать секрет..."),
+          ],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await interaction.deferReply();
+      const result = await playSecretSong(voiceChannel);
+
+      if ("error" in result) {
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle("❌ Что-то пошло не так")
+              .setDescription(result.error),
+          ],
+        });
+        return;
+      }
+
+      await interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle("🤫 Секрет раскрыт!")
+            .setDescription(`Бот зашёл в **${voiceChannel.name}** и запускает...\n\n**${result.label}** 🎵`)
+            .setFooter({ text: "Наслаждайся! Бот уйдёт когда трек закончится." }),
         ],
       });
     }
