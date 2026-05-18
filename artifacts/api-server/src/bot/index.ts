@@ -417,13 +417,16 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
-    .setName("announce")
-    .setDescription("Отправить объявление в канал (только для админов)")
+    .setName("оповещение")
+    .setDescription("Создать оповещение с подтверждением @everyone (только для админов)")
     .addStringOption((opt) =>
-      opt.setName("текст").setDescription("Текст объявления").setRequired(true)
+      opt.setName("время").setDescription("Время события, например: 20:00").setRequired(true)
     )
-    .addChannelOption((opt) =>
-      opt.setName("канал").setDescription("Куда отправить (по умолчанию текущий канал)").setRequired(false)
+    .addStringOption((opt) =>
+      opt.setName("имя").setDescription("Имя трибуны / ведущего / события").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("текст").setDescription("Текст оповещения").setRequired(true)
     ),
 ];
 
@@ -1624,28 +1627,81 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    else if (commandName === "announce") {
+    else if (commandName === "оповещение") {
       if (!isAdminOrOwner(interaction.member as GuildMember)) {
-        await interaction.reply({ content: "❌ Только администраторы могут делать объявления.", flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: "❌ Только администраторы могут делать оповещения.", flags: MessageFlags.Ephemeral });
         return;
       }
+
+      const time = interaction.options.getString("время", true);
+      const name = interaction.options.getString("имя", true);
       const text = interaction.options.getString("текст", true);
-      const targetChannel = interaction.options.getChannel("канал") ?? interaction.channel;
-      if (!targetChannel || !("send" in targetChannel)) {
-        await interaction.reply({ content: "❌ Не удалось получить канал.", flags: MessageFlags.Ephemeral });
-        return;
-      }
-      await (targetChannel as import("discord.js").TextChannel).send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xfee75c)
-            .setTitle("📢 Объявление")
-            .setDescription(text)
-            .setFooter({ text: `От ${interaction.user.tag}` })
-            .setTimestamp(),
-        ],
+      const announceId = `ann_${interaction.id}`;
+
+      const confirmEmbed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("🔔 Проверьте оповещение")
+        .setDescription(`> ${text}`)
+        .addFields(
+          { name: "🕐 Время", value: time, inline: true },
+          { name: "🎙️ Трибуна", value: name, inline: true },
+          { name: "⏳ Отправка", value: "через **13 секунд**", inline: true },
+        )
+        .setFooter({ text: `Создал ${interaction.user.tag} • Нажми «Отменить» или «Перенести»` })
+        .setTimestamp();
+
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`announce_cancel_${announceId}`)
+          .setLabel("Отменить")
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji("❌"),
+        new ButtonBuilder()
+          .setCustomId(`announce_postpone_${announceId}`)
+          .setLabel("Перенести")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("🕐"),
+      );
+
+      await interaction.reply({ embeds: [confirmEmbed], components: [row] });
+      const confirmMsg = await interaction.fetchReply();
+
+      const timeout = setTimeout(async () => {
+        const pending = pendingAnnouncements.get(announceId);
+        if (!pending) return;
+        pendingAnnouncements.delete(announceId);
+
+        await interaction.deleteReply().catch(() => {});
+
+        const channel = await client.channels.fetch(pending.channelId).catch(() => null);
+        if (!channel?.isTextBased() || channel.isDMBased()) return;
+
+        await (channel as TextChannel).send({
+          content: "@everyone",
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xfee75c)
+              .setTitle("📢 Оповещение")
+              .setDescription(pending.text)
+              .addFields(
+                { name: "🕐 Время", value: pending.time, inline: true },
+                { name: "🎙️ Трибуна", value: pending.name, inline: true },
+              )
+              .setFooter({ text: `Оповещение от ${pending.authorTag}` })
+              .setTimestamp(),
+          ],
+        });
+      }, 13_000);
+
+      pendingAnnouncements.set(announceId, {
+        time,
+        name,
+        text,
+        authorTag: interaction.user.tag,
+        channelId: interaction.channelId,
+        confirmMsgId: confirmMsg.id,
+        timeout,
       });
-      await interaction.reply({ content: `✅ Объявление отправлено в ${targetChannel}.`, flags: MessageFlags.Ephemeral });
     }
 
   } catch (err) {
@@ -1836,109 +1892,6 @@ client.on("messageCreate", async (message: Message) => {
   if (message.author.bot) return;
   const content = message.content.trim();
   if (!content) return;
-
-  // ── Prefix commands (!announce / !объявление) ──────────────────────────────
-  if (content.startsWith("!")) {
-    const withoutBang = content.slice(1).trim();
-    const firstSpace = withoutBang.indexOf(" ");
-    const cmd = (firstSpace === -1 ? withoutBang : withoutBang.slice(0, firstSpace)).toLowerCase();
-    const rest = firstSpace === -1 ? "" : withoutBang.slice(firstSpace + 1).trim();
-
-    if (cmd === "announce" || cmd === "объявление" || cmd === "оповещение") {
-      // Format: !оповещение <время> / <имя> / <текст>
-      const member = message.member;
-      if (!member || !isAdminOrOwner(member)) {
-        const errMsg = await message.reply({ content: "❌ Только администраторы могут делать оповещения." });
-        setTimeout(() => errMsg.delete().catch(() => {}), 5000);
-        return;
-      }
-
-      const segments = rest.split("/").map((s) => s.trim());
-      if (segments.length < 3 || !segments[0] || !segments[1] || !segments[2]) {
-        const errMsg = await message.reply(
-          "❌ Неверный формат. Используй:\n`!оповещение <время> / <имя> / <текст>`\nПример: `!оповещение 20:00 / Иван / Добро пожаловать на стрим!`"
-        );
-        setTimeout(() => errMsg.delete().catch(() => {}), 8000);
-        return;
-      }
-
-      const time = segments[0];
-      const name = segments[1];
-      const text = segments.slice(2).join("/").trim();
-
-      await message.delete().catch(() => {});
-
-      const announceId = `ann_${Date.now()}_${message.author.id}`;
-
-      const confirmEmbed = new EmbedBuilder()
-        .setColor(0xffa500)
-        .setTitle("🔔 Проверьте оповещение")
-        .setDescription(`> ${text}`)
-        .addFields(
-          { name: "🕐 Время", value: time, inline: true },
-          { name: "🎙️ Трибуна", value: name, inline: true },
-          { name: "⏳ Отправка", value: "через **13 секунд**", inline: true },
-        )
-        .setFooter({ text: `Создал ${message.author.tag} • Нажми «Отменить» или «Перенести»` })
-        .setTimestamp();
-
-      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`announce_cancel_${announceId}`)
-          .setLabel("Отменить")
-          .setStyle(ButtonStyle.Danger)
-          .setEmoji("❌"),
-        new ButtonBuilder()
-          .setCustomId(`announce_postpone_${announceId}`)
-          .setLabel("Перенести")
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji("🕐"),
-      );
-
-      const confirmMsg = await message.channel.send({ embeds: [confirmEmbed], components: [row] });
-
-      const timeout = setTimeout(async () => {
-        const pending = pendingAnnouncements.get(announceId);
-        if (!pending) return;
-        pendingAnnouncements.delete(announceId);
-
-        await confirmMsg.delete().catch(() => {});
-
-        const channel = await client.channels.fetch(pending.channelId).catch(() => null);
-        if (!channel?.isTextBased() || channel.isDMBased()) return;
-
-        await (channel as TextChannel).send({
-          content: "@everyone",
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0xfee75c)
-              .setTitle("📢 Оповещение")
-              .setDescription(pending.text)
-              .addFields(
-                { name: "🕐 Время", value: pending.time, inline: true },
-                { name: "🎙️ Трибуна", value: pending.name, inline: true },
-              )
-              .setFooter({ text: `Оповещение от ${pending.authorTag}` })
-              .setTimestamp(),
-          ],
-        });
-      }, 13_000);
-
-      pendingAnnouncements.set(announceId, {
-        time,
-        name,
-        text,
-        authorTag: message.author.tag,
-        channelId: message.channelId,
-        confirmMsgId: confirmMsg.id,
-        timeout,
-      });
-
-      return;
-    }
-    // Unknown ! command — ignore silently
-    return;
-  }
 
   // ── Chat mode (AI replies to every message) ────────────────────────────────
   if (!chatModeChannels.has(message.channelId)) return;
