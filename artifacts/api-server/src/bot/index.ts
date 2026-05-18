@@ -76,6 +76,17 @@ interface SayLog {
 
 const sayLog = new Map<string, SayLog>();
 
+interface PendingAnnouncement {
+  time: string;
+  name: string;
+  text: string;
+  authorTag: string;
+  channelId: string;
+  confirmMsgId: string;
+  timeout: ReturnType<typeof setTimeout>;
+}
+const pendingAnnouncements = new Map<string, PendingAnnouncement>();
+
 const CREATOR_ROLE_NAME = "создатель";
 
 function isAdminOrOwner(member: GuildMember, guild?: import("discord.js").Guild): boolean {
@@ -1705,6 +1716,58 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  if (customId.startsWith("announce_cancel_") || customId.startsWith("announce_postpone_")) {
+    const isCancel = customId.startsWith("announce_cancel_");
+    const announceId = customId.slice(isCancel ? "announce_cancel_".length : "announce_postpone_".length);
+    const pending = pendingAnnouncements.get(announceId);
+
+    if (!pending) {
+      await interaction.reply({ content: "❌ Это оповещение уже было отправлено или отменено.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    clearTimeout(pending.timeout);
+    pendingAnnouncements.delete(announceId);
+
+    const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("ann_done_cancel").setLabel("Отменить").setStyle(ButtonStyle.Danger).setEmoji("❌").setDisabled(true),
+      new ButtonBuilder().setCustomId("ann_done_postpone").setLabel("Перенести").setStyle(ButtonStyle.Secondary).setEmoji("🕐").setDisabled(true),
+    );
+
+    if (isCancel) {
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xed4245)
+            .setTitle("❌ Оповещение отменено")
+            .setDescription(`> ${pending.text}`)
+            .addFields(
+              { name: "🕐 Время", value: pending.time, inline: true },
+              { name: "🎙️ Трибуна", value: pending.name, inline: true },
+            )
+            .setFooter({ text: `Отменил ${interaction.user.tag}` })
+            .setTimestamp(),
+        ],
+        components: [disabledRow],
+      });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+    } else {
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle("🕐 Оповещение перенесено")
+            .setDescription(`Используй команду снова с новым временем:\n\`!оповещение <новое время> / ${pending.name} / ${pending.text}\``)
+            .setFooter({ text: `Перенёс ${interaction.user.tag}` })
+            .setTimestamp(),
+        ],
+        components: [disabledRow],
+      });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 8000);
+    }
+    return;
+  }
+
   if (customId.startsWith("rps_") && !customId.startsWith("rps_expired") && !customId.startsWith("rps_done")) {
     const withoutPrefix = customId.slice("rps_".length);
     const lastUnder = withoutPrefix.lastIndexOf("_");
@@ -1782,42 +1845,95 @@ client.on("messageCreate", async (message: Message) => {
     const rest = firstSpace === -1 ? "" : withoutBang.slice(firstSpace + 1).trim();
 
     if (cmd === "announce" || cmd === "объявление" || cmd === "оповещение") {
-      // Format: !announce <время> <имя трибуны> <текст>
-      const parts = rest.split(" ");
-      if (parts.length < 3) {
-        await message.reply(
-          "❌ Неверный формат. Используй:\n`!announce <время> <имя> <текст>`\nПример: `!announce 20:00 Иван Добро пожаловать!`"
-        );
-        return;
-      }
-
-      // Check permissions
+      // Format: !оповещение <время> / <имя> / <текст>
       const member = message.member;
       if (!member || !isAdminOrOwner(member)) {
-        await message.reply({ content: "❌ Только администраторы могут делать оповещения." });
+        const errMsg = await message.reply({ content: "❌ Только администраторы могут делать оповещения." });
+        setTimeout(() => errMsg.delete().catch(() => {}), 5000);
         return;
       }
 
-      const time = parts[0]!;
-      const name = parts[1]!;
-      const text = parts.slice(2).join(" ");
+      const segments = rest.split("/").map((s) => s.trim());
+      if (segments.length < 3 || !segments[0] || !segments[1] || !segments[2]) {
+        const errMsg = await message.reply(
+          "❌ Неверный формат. Используй:\n`!оповещение <время> / <имя> / <текст>`\nПример: `!оповещение 20:00 / Иван / Добро пожаловать на стрим!`"
+        );
+        setTimeout(() => errMsg.delete().catch(() => {}), 8000);
+        return;
+      }
+
+      const time = segments[0];
+      const name = segments[1];
+      const text = segments.slice(2).join("/").trim();
 
       await message.delete().catch(() => {});
 
-      await message.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xfee75c)
-            .setTitle("📢 Оповещение")
-            .setDescription(text)
-            .addFields(
-              { name: "🕐 Время", value: time, inline: true },
-              { name: "🎙️ Трибуна", value: name, inline: true },
-            )
-            .setFooter({ text: `Оповещение от ${message.author.tag}` })
-            .setTimestamp(),
-        ],
+      const announceId = `ann_${Date.now()}_${message.author.id}`;
+
+      const confirmEmbed = new EmbedBuilder()
+        .setColor(0xffa500)
+        .setTitle("🔔 Проверьте оповещение")
+        .setDescription(`> ${text}`)
+        .addFields(
+          { name: "🕐 Время", value: time, inline: true },
+          { name: "🎙️ Трибуна", value: name, inline: true },
+          { name: "⏳ Отправка", value: "через **13 секунд**", inline: true },
+        )
+        .setFooter({ text: `Создал ${message.author.tag} • Нажми «Отменить» или «Перенести»` })
+        .setTimestamp();
+
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`announce_cancel_${announceId}`)
+          .setLabel("Отменить")
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji("❌"),
+        new ButtonBuilder()
+          .setCustomId(`announce_postpone_${announceId}`)
+          .setLabel("Перенести")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("🕐"),
+      );
+
+      const confirmMsg = await message.channel.send({ embeds: [confirmEmbed], components: [row] });
+
+      const timeout = setTimeout(async () => {
+        const pending = pendingAnnouncements.get(announceId);
+        if (!pending) return;
+        pendingAnnouncements.delete(announceId);
+
+        await confirmMsg.delete().catch(() => {});
+
+        const channel = await client.channels.fetch(pending.channelId).catch(() => null);
+        if (!channel?.isTextBased() || channel.isDMBased()) return;
+
+        await (channel as TextChannel).send({
+          content: "@everyone",
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xfee75c)
+              .setTitle("📢 Оповещение")
+              .setDescription(pending.text)
+              .addFields(
+                { name: "🕐 Время", value: pending.time, inline: true },
+                { name: "🎙️ Трибуна", value: pending.name, inline: true },
+              )
+              .setFooter({ text: `Оповещение от ${pending.authorTag}` })
+              .setTimestamp(),
+          ],
+        });
+      }, 13_000);
+
+      pendingAnnouncements.set(announceId, {
+        time,
+        name,
+        text,
+        authorTag: message.author.tag,
+        channelId: message.channelId,
+        confirmMsgId: confirmMsg.id,
+        timeout,
       });
+
       return;
     }
     // Unknown ! command — ignore silently
