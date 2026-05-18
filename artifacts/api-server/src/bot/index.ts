@@ -1771,8 +1771,61 @@ client.on("interactionCreate", async (interaction) => {
 
 client.on("messageCreate", async (message: Message) => {
   if (message.author.bot) return;
+  const content = message.content.trim();
+  if (!content) return;
+
+  // ── Prefix commands (!announce / !объявление) ──────────────────────────────
+  if (content.startsWith("!")) {
+    const withoutBang = content.slice(1).trim();
+    const firstSpace = withoutBang.indexOf(" ");
+    const cmd = (firstSpace === -1 ? withoutBang : withoutBang.slice(0, firstSpace)).toLowerCase();
+    const rest = firstSpace === -1 ? "" : withoutBang.slice(firstSpace + 1).trim();
+
+    if (cmd === "announce" || cmd === "объявление" || cmd === "оповещение") {
+      // Format: !announce <время> <имя трибуны> <текст>
+      const parts = rest.split(" ");
+      if (parts.length < 3) {
+        await message.reply(
+          "❌ Неверный формат. Используй:\n`!announce <время> <имя> <текст>`\nПример: `!announce 20:00 Иван Добро пожаловать!`"
+        );
+        return;
+      }
+
+      // Check permissions
+      const member = message.member;
+      if (!member || !isAdminOrOwner(member)) {
+        await message.reply({ content: "❌ Только администраторы могут делать оповещения." });
+        return;
+      }
+
+      const time = parts[0]!;
+      const name = parts[1]!;
+      const text = parts.slice(2).join(" ");
+
+      await message.delete().catch(() => {});
+
+      await message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xfee75c)
+            .setTitle("📢 Оповещение")
+            .setDescription(text)
+            .addFields(
+              { name: "🕐 Время", value: time, inline: true },
+              { name: "🎙️ Трибуна", value: name, inline: true },
+            )
+            .setFooter({ text: `Оповещение от ${message.author.tag}` })
+            .setTimestamp(),
+        ],
+      });
+      return;
+    }
+    // Unknown ! command — ignore silently
+    return;
+  }
+
+  // ── Chat mode (AI replies to every message) ────────────────────────────────
   if (!chatModeChannels.has(message.channelId)) return;
-  if (!message.content.trim()) return;
 
   try {
     await message.channel.sendTyping();
