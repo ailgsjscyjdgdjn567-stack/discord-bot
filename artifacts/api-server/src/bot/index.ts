@@ -430,31 +430,21 @@ const commands = [
     ),
 ];
 
-async function registerCommands(guildId: string) {
+async function registerGlobalCommands() {
   const rest = new REST({ version: "10" }).setToken(token!);
   const clientId = client.user!.id;
-  await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
+  await rest.put(Routes.applicationCommands(clientId), {
     body: commands.map((c) => c.toJSON()),
   });
-  logger.info({ guildId }, "Slash commands registered");
+  logger.info("Global slash commands registered");
 }
 
 client.once("ready", async () => {
   logger.info({ tag: client.user?.tag }, "Discord bot ready");
-  for (const guild of client.guilds.cache.values()) {
-    try {
-      await registerCommands(guild.id);
-    } catch (err) {
-      logger.error({ err, guildId: guild.id }, "Failed to register commands");
-    }
-  }
-});
-
-client.on("guildCreate", async (guild) => {
   try {
-    await registerCommands(guild.id);
+    await registerGlobalCommands();
   } catch (err) {
-    logger.error({ err, guildId: guild.id }, "Failed to register commands on join");
+    logger.error({ err }, "Failed to register global commands");
   }
 });
 
