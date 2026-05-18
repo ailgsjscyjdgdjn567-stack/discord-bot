@@ -21,6 +21,9 @@ import { playSecretSong } from "./secret";
 
 const chatModeChannels = new Set<string>();
 
+// guildId → channelId for global cross-server chat
+const globalChatChannels = new Map<string, string>();
+
 const conversationHistory = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
 
 interface TriviaGame {
@@ -427,6 +430,19 @@ const commands = [
     )
     .addStringOption((opt) =>
       opt.setName("текст").setDescription("Текст оповещения").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("globalchat")
+    .setDescription("Глобальный чат между серверами")
+    .addSubcommand((sub) =>
+      sub.setName("setup").setDescription("Подключить этот канал к глобальному чату (только для админов)")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("leave").setDescription("Отключить глобальный чат в этом сервере (только для админов)")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("info").setDescription("Показать статус глобального чата")
     ),
 ];
 
@@ -1694,6 +1710,87 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    else if (commandName === "globalchat") {
+      const sub = interaction.options.getSubcommand();
+      const guildId = interaction.guildId!;
+
+      if (sub === "setup") {
+        if (!isAdminOrOwner(interaction.member as GuildMember)) {
+          await interaction.reply({ content: "❌ Только администраторы могут настраивать глобальный чат.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+        globalChatChannels.set(guildId, interaction.channelId);
+        const serverCount = globalChatChannels.size;
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x57f287)
+              .setTitle("🌐 Глобальный чат подключён!")
+              .setDescription(`Этот канал теперь подключён к глобальному чату.\nСообщения отсюда будут видны на **${serverCount}** ${serverCount === 1 ? "сервере" : "серверах"}.`)
+              .addFields({ name: "📌 Канал", value: `<#${interaction.channelId}>`, inline: true })
+              .setFooter({ text: "Настроил " + interaction.user.tag })
+              .setTimestamp(),
+          ],
+        });
+
+        // Notify other servers about new server joining
+        for (const [otherGuildId, otherChannelId] of globalChatChannels) {
+          if (otherGuildId === guildId) continue;
+          const ch = await client.channels.fetch(otherChannelId).catch(() => null);
+          if (!ch?.isTextBased() || ch.isDMBased()) continue;
+          await (ch as TextChannel).send({
+            embeds: [
+              new EmbedBuilder()
+                .setColor(0x57f287)
+                .setTitle("🌐 Новый сервер подключился!")
+                .setDescription(`**${interaction.guild!.name}** присоединился к глобальному чату. Теперь вас **${serverCount}** ${serverCount === 1 ? "сервер" : "серверов"}.`)
+                .setThumbnail(interaction.guild!.iconURL() ?? null)
+                .setTimestamp(),
+            ],
+          }).catch(() => {});
+        }
+
+      } else if (sub === "leave") {
+        if (!isAdminOrOwner(interaction.member as GuildMember)) {
+          await interaction.reply({ content: "❌ Только администраторы могут настраивать глобальный чат.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+        if (!globalChatChannels.has(guildId)) {
+          await interaction.reply({ content: "❌ Этот сервер не подключён к глобальному чату.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+        globalChatChannels.delete(guildId);
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle("🌐 Глобальный чат отключён")
+              .setDescription("Этот сервер больше не участвует в глобальном чате.")
+              .setTimestamp(),
+          ],
+        });
+
+      } else if (sub === "info") {
+        const connected = globalChatChannels.has(guildId);
+        const channelId = globalChatChannels.get(guildId);
+        const serverCount = globalChatChannels.size;
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(connected ? 0x57f287 : 0xfee75c)
+              .setTitle("🌐 Глобальный чат — статус")
+              .addFields(
+                { name: "Статус", value: connected ? "✅ Подключён" : "❌ Не подключён", inline: true },
+                { name: "Канал", value: connected ? `<#${channelId}>` : "—", inline: true },
+                { name: "Серверов в сети", value: `${serverCount}`, inline: true },
+              )
+              .setTimestamp(),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    }
+
   } catch (err) {
     logger.error({ err, commandName }, "Error handling slash command");
     const errMsg = "❌ Произошла ошибка при выполнении команды.";
@@ -1882,6 +1979,32 @@ client.on("messageCreate", async (message: Message) => {
   if (message.author.bot) return;
   const content = message.content.trim();
   if (!content) return;
+
+  // ── Global cross-server chat ───────────────────────────────────────────────
+  const senderGuildId = message.guildId;
+  if (senderGuildId && globalChatChannels.get(senderGuildId) === message.channelId) {
+    const avatarUrl = message.author.displayAvatarURL({ size: 64 });
+    const guildName = message.guild?.name ?? "Неизвестный сервер";
+    const guildIcon = message.guild?.iconURL() ?? null;
+    const text = message.content.slice(0, 4000) || null;
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setAuthor({ name: `${message.author.displayName} • ${guildName}`, iconURL: avatarUrl })
+      .setTimestamp();
+    if (guildIcon) embed.setFooter({ text: guildName, iconURL: guildIcon });
+    if (text) embed.setDescription(text);
+    // Forward attachments as image if any
+    const img = message.attachments.find((a) => a.contentType?.startsWith("image/"));
+    if (img) embed.setImage(img.url);
+
+    for (const [targetGuildId, targetChannelId] of globalChatChannels) {
+      if (targetGuildId === senderGuildId) continue;
+      const ch = await client.channels.fetch(targetChannelId).catch(() => null);
+      if (!ch?.isTextBased() || ch.isDMBased()) continue;
+      await (ch as TextChannel).send({ embeds: [embed] }).catch(() => {});
+    }
+    return;
+  }
 
   // ── Chat mode (AI replies to every message) ────────────────────────────────
   if (!chatModeChannels.has(message.channelId)) return;
