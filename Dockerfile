@@ -1,6 +1,6 @@
 FROM node:24-slim
 
-RUN npm install -g pnpm@latest
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
